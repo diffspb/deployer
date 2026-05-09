@@ -26,6 +26,8 @@ class Healthcheck:
     path: str = "/health"
     scheme: str = "http"
     timeout_seconds: float = 10.0
+    retries: int = 12
+    interval_seconds: float = 2.0
 
 
 @dataclass(frozen=True)
@@ -161,7 +163,19 @@ def _parse_healthcheck(raw: Any) -> Healthcheck:
     timeout = raw.get("timeout_seconds", 10.0)
     if not isinstance(timeout, int | float) or timeout <= 0:
         raise ManifestError("healthcheck.timeout_seconds must be positive")
-    return Healthcheck(path=path, scheme=scheme, timeout_seconds=float(timeout))
+    retries = raw.get("retries", 12)
+    if not isinstance(retries, int) or retries <= 0:
+        raise ManifestError("healthcheck.retries must be a positive integer")
+    interval = raw.get("interval_seconds", 2.0)
+    if not isinstance(interval, int | float) or interval <= 0:
+        raise ManifestError("healthcheck.interval_seconds must be positive")
+    return Healthcheck(
+        path=path,
+        scheme=scheme,
+        timeout_seconds=float(timeout),
+        retries=retries,
+        interval_seconds=float(interval),
+    )
 
 
 def _default_route_name(project_name: str, raw: dict[str, Any]) -> str:

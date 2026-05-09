@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from urllib.error import URLError
 from urllib.request import urlopen
+from time import sleep
 
 from deployer.manifest import Healthcheck, Manifest
 from deployer.override import route_host
@@ -25,12 +26,20 @@ def check_health(manifest: Manifest, environment: str = "prod") -> tuple[bool, s
     if url is None:
         return True, "healthcheck skipped"
 
-    timeout = manifest.healthcheck.timeout_seconds if manifest.healthcheck else 10.0
-    try:
-        with urlopen(url, timeout=timeout) as response:
-            status = getattr(response, "status", 200)
-            if 200 <= status < 300:
-                return True, f"healthcheck ok: {url}"
-            return False, f"healthcheck failed with status {status}: {url}"
-    except URLError as exc:
-        return False, f"healthcheck failed: {url}: {exc}"
+    health = manifest.healthcheck
+    timeout = health.timeout_seconds if health else 10.0
+    retries = health.retries if health else 1
+    interval = health.interval_seconds if health else 1.0
+    last_error = "unknown error"
+    for attempt in range(1, retries + 1):
+        try:
+            with urlopen(url, timeout=timeout) as response:
+                status = getattr(response, "status", 200)
+                if 200 <= status < 300:
+                    return True, f"healthcheck ok: {url} after {attempt} attempt(s)"
+                last_error = f"status {status}"
+        except URLError as exc:
+            last_error = str(exc)
+        if attempt < retries:
+            sleep(interval)
+    return False, f"healthcheck failed: {url}: {last_error}"

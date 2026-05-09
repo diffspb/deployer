@@ -44,6 +44,7 @@ def test_check_health_failure(monkeypatch):
         raise URLError("no route")
 
     monkeypatch.setattr("deployer.health.urlopen", fail)
+    monkeypatch.setattr("deployer.health.sleep", lambda seconds: None)
 
     ok, message = check_health(_manifest())
 
