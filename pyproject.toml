@@ -7,7 +7,7 @@ name = "home-paas-deployer"
 version = "0.1.0"
 description = "Small self-hosted deployer for a personal Docker Compose PaaS."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
     "PyYAML>=6.0.1",
 ]
