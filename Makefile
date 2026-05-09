@@ -1,7 +1,7 @@
 PYTHON = .venv/bin/python
 PIP = .venv/bin/pip
 
-.PHONY: venv install test coverage validate-samples render-tasktrack render-cpucol clean
+.PHONY: venv install test coverage validate-samples render-tasktrack render-cpucol docker-build clean
 
 venv:
 	python3 -m venv .venv
@@ -25,6 +25,9 @@ render-tasktrack:
 
 render-cpucol:
 	$(PYTHON) -m deployer.cli render-override /home/sanek/projects/claudecode/test_proj --manifest docs/sample-manifests/cpucol.deployer.yml
+
+docker-build:
+	docker build -t home-paas-deployer:latest .
 
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
