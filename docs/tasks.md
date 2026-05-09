@@ -33,6 +33,21 @@
 - [ ] Move default state DB to `/var/lib/deployer/state.db` in packaged service usage
 - [ ] Run CLI from inside the deployer container through Docker socket proxy
 
+## Service Catalog v1
+
+- [ ] Document target service/source/environment model in `docs/service-catalog-plan.md`
+- [ ] Add `services` table
+- [ ] Add `environments` table
+- [ ] Add managed runtime layout under `/var/lib/deployer/services/<name>/`
+- [ ] Add git source support: clone, fetch, refs, checkout
+- [ ] Add local source support as debug/admin mode
+- [ ] Add environment variable storage
+- [ ] Render env files to managed workspace
+- [ ] Change primary CLI workflow to service names
+- [ ] Keep path-based commands for development/debug use
+- [ ] Add `restart` command
+- [ ] Add `logs` command
+
 ## Phase 2: Runtime Hardening
 
 - [ ] Add Docker socket proxy compose service for deployer.

@@ -56,6 +56,8 @@ deployer history --state-db /var/lib/deployer/state.db tasktrack
 
 The UI should not call Docker directly. It should call the same engine service layer used by CLI.
 
+The target workflow is service-based, not path-based. See `docs/service-catalog-plan.md`.
+
 Initial UI screens:
 
 - Project list.
