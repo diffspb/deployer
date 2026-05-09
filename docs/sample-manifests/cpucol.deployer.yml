@@ -1,0 +1,21 @@
+name: cpucol
+service: app
+port: 8000
+compose:
+  files:
+    - docker-compose.yml
+    - docker-compose.prod.yml
+env_file: .env.prod
+routes:
+  - name: cpucol-prod-public
+    host: cpu.busypage.ru
+    path_prefix: /api/public/
+    auth: none
+    priority: 20
+  - name: cpucol-prod
+    host: cpu.busypage.ru
+    exclude_path_prefix: /api/public/
+    auth: sso
+    priority: 10
+healthcheck:
+  path: /health

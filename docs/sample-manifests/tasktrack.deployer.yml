@@ -1,0 +1,15 @@
+name: tasktrack
+service: app
+port: 8000
+compose:
+  files:
+    - docker-compose.yml
+    - docker-compose.prod.yml
+env_file: .env.prod
+routes:
+  - host: tasktrack.busypage.ru
+    auth: none
+    middlewares:
+      - secure-headers@file
+healthcheck:
+  path: /health

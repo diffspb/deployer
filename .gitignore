@@ -1,0 +1,11 @@
+.venv/
+.git-local/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+__pycache__/
+*.pyc
+.deployer/
+state.db
+*:Zone.Identifier
