@@ -38,6 +38,8 @@ Current implementation focuses on the first deployer engine:
 - Command logging.
 - Optional healthcheck.
 - CLI suitable for later reuse by FastAPI UI.
+- Environment-aware prod/dev deployment.
+- Stop and status commands.
 
 See:
 

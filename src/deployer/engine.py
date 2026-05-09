@@ -20,6 +20,16 @@ _locks: dict[str, threading.Lock] = {}
 class DeployResult:
     deployment_id: int
     project: str
+    environment: str
+    status: str
+    log: str
+    override_path: Path
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    project: str
+    environment: str
     status: str
     log: str
     override_path: Path
@@ -46,9 +56,14 @@ class DeploymentEngine:
     ) -> DeployResult:
         project_dir = project_dir.resolve()
         manifest = load_manifest(project_dir, manifest_path=manifest_path)
-        deployment_id = self.state.create_deployment(manifest.project_name, version)
+        deployment_id = self.state.create_deployment(
+            manifest.project_name,
+            environment,
+            "deploy",
+            version,
+        )
         log_parts: list[str] = []
-        override_path = project_dir / ".deployer" / "docker-compose.override.yml"
+        override_path = project_dir / ".deployer" / f"{environment}.override.yml"
 
         lock = _project_lock(manifest.project_name)
         with lock:
@@ -70,7 +85,7 @@ class DeploymentEngine:
 
                 log = "\n".join(part for part in log_parts if part)
                 self.state.finish_deployment(deployment_id, "success", log)
-                return DeployResult(deployment_id, manifest.project_name, "success", log, override_path)
+                return DeployResult(deployment_id, manifest.project_name, environment, "success", log, override_path)
             except (CommandError, RuntimeError) as exc:
                 if isinstance(exc, CommandError):
                     log_parts.append(exc.output)
@@ -78,14 +93,82 @@ class DeploymentEngine:
                     log_parts.append(str(exc))
                 log = "\n".join(part for part in log_parts if part)
                 self.state.finish_deployment(deployment_id, "failed", log)
-                return DeployResult(deployment_id, manifest.project_name, "failed", log, override_path)
+                return DeployResult(deployment_id, manifest.project_name, environment, "failed", log, override_path)
+
+    def stop(
+        self,
+        project_dir: Path,
+        dry_run: bool = False,
+        manifest_path: Path | None = None,
+        environment: str = "prod",
+    ) -> DeployResult:
+        project_dir = project_dir.resolve()
+        manifest = load_manifest(project_dir, manifest_path=manifest_path)
+        deployment_id = self.state.create_deployment(
+            manifest.project_name,
+            environment,
+            "stop",
+            None,
+        )
+        log_parts: list[str] = []
+        override_path = project_dir / ".deployer" / f"{environment}.override.yml"
+
+        lock = _project_lock(manifest.project_name)
+        with lock:
+            try:
+                override_path = write_override(project_dir, manifest, environment=environment)
+                log_parts.append(f"Generated override: {override_path}")
+                command = compose_command(manifest, override_path, environment=environment, action="down")
+                log_parts.append(f"Command: {' '.join(command)}")
+                if dry_run:
+                    log_parts.append("Dry run: docker compose was not executed")
+                else:
+                    result = self.runner.run(command, cwd=project_dir)
+                    log_parts.append(result.output)
+                log = "\n".join(part for part in log_parts if part)
+                self.state.finish_deployment(deployment_id, "success", log)
+                return DeployResult(deployment_id, manifest.project_name, environment, "success", log, override_path)
+            except CommandError as exc:
+                log_parts.append(exc.output)
+                log = "\n".join(part for part in log_parts if part)
+                self.state.finish_deployment(deployment_id, "failed", log)
+                return DeployResult(deployment_id, manifest.project_name, environment, "failed", log, override_path)
+
+    def status(
+        self,
+        project_dir: Path,
+        manifest_path: Path | None = None,
+        environment: str = "prod",
+    ) -> CommandResult:
+        project_dir = project_dir.resolve()
+        manifest = load_manifest(project_dir, manifest_path=manifest_path)
+        override_path = write_override(project_dir, manifest, environment=environment)
+        command = compose_command(manifest, override_path, environment=environment, action="ps")
+        try:
+            result = self.runner.run(command, cwd=project_dir)
+            return CommandResult(manifest.project_name, environment, "success", result.output, override_path)
+        except CommandError as exc:
+            return CommandResult(manifest.project_name, environment, "failed", exc.output, override_path)
 
 
-def compose_command(manifest: Manifest, override_path: Path, environment: str = "prod") -> list[str]:
+def compose_command(
+    manifest: Manifest,
+    override_path: Path,
+    environment: str = "prod",
+    action: str = "up",
+) -> list[str]:
     command = ["docker", "compose", "-p", manifest.project_name_for(environment)]
     for file in manifest.compose.files:
         command.extend(["-f", file])
-    command.extend(["-f", str(override_path), "up", "-d", "--build"])
+    command.extend(["-f", str(override_path)])
+    if action == "up":
+        command.extend(["up", "-d", "--build"])
+    elif action == "down":
+        command.append("down")
+    elif action == "ps":
+        command.append("ps")
+    else:
+        raise ValueError(f"Unknown compose action: {action}")
     return command
 
 

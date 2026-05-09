@@ -31,6 +31,8 @@ DeploymentEngine
 deployer validate /path/to/project
 deployer render-override /path/to/project
 deployer deploy /path/to/project --state-db /var/lib/deployer/state.db
+deployer stop /path/to/project --state-db /var/lib/deployer/state.db
+deployer status /path/to/project --state-db /var/lib/deployer/state.db
 deployer history --state-db /var/lib/deployer/state.db tasktrack
 ```
 
@@ -38,13 +40,17 @@ deployer history --state-db /var/lib/deployer/state.db tasktrack
 
 1. Load `deployer.yml`.
 2. Validate required compose files.
-3. Generate `.deployer/docker-compose.override.yml`.
+3. Generate `.deployer/<environment>.override.yml`.
 4. Create deployment record in SQLite.
 5. Acquire per-project lock.
 6. Run `docker compose -p <name> -f ... up -d --build`.
 7. Run optional healthcheck.
 8. Mark deployment as `success` or `failed`.
 9. Persist command log.
+
+`prod` uses the base project name and `<subdomain>.<domain>`.
+
+`dev` uses `<project>-dev` as Compose project name and `<subdomain>.dev.<domain>`.
 
 ## Future FastAPI UI
 

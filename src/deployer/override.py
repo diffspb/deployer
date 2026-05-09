@@ -53,7 +53,7 @@ def write_override(
 ) -> Path:
     deployer_dir = project_dir / ".deployer"
     deployer_dir.mkdir(exist_ok=True)
-    path = deployer_dir / "docker-compose.override.yml"
+    path = deployer_dir / f"{environment}.override.yml"
     path.write_text(render_override(manifest, platform, environment))
     return path
 

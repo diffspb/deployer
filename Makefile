@@ -26,6 +26,9 @@ render-tasktrack:
 render-cpucol:
 	$(PYTHON) -m deployer.cli render-override /home/sanek/projects/claudecode/test_proj --manifest docs/sample-manifests/cpucol.deployer.yml
 
+status-cpucol:
+	$(PYTHON) -m deployer.cli status /home/sanek/projects/claudecode/test_proj --manifest docs/sample-manifests/cpucol.deployer.yml --environment dev
+
 docker-build:
 	docker build -t home-paas-deployer:latest .
 

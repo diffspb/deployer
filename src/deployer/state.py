@@ -10,6 +10,8 @@ from pathlib import Path
 class DeploymentRecord:
     id: int
     project: str
+    environment: str
+    action: str
     version: str | None
     status: str
     started_at: str
@@ -23,15 +25,21 @@ class StateStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
-    def create_deployment(self, project: str, version: str | None) -> int:
+    def create_deployment(
+        self,
+        project: str,
+        environment: str,
+        action: str,
+        version: str | None,
+    ) -> int:
         now = _now()
         with self._connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO deployments(project, version, status, started_at, log)
-                VALUES (?, ?, 'running', ?, '')
+                INSERT INTO deployments(project, environment, action, version, status, started_at, log)
+                VALUES (?, ?, ?, ?, 'running', ?, '')
                 """,
-                (project, version, now),
+                (project, environment, action, version, now),
             )
             return int(cursor.lastrowid)
 
@@ -48,17 +56,28 @@ class StateStore:
                 (status, _now(), log, deployment_id),
             )
 
-    def history(self, project: str, limit: int = 20) -> list[DeploymentRecord]:
+    def history(
+        self,
+        project: str,
+        environment: str | None = None,
+        limit: int = 20,
+    ) -> list[DeploymentRecord]:
+        where = "WHERE project = ?"
+        params: list[object] = [project]
+        if environment:
+            where += " AND environment = ?"
+            params.append(environment)
+        params.append(limit)
         with self._connect() as conn:
             rows = conn.execute(
-                """
-                SELECT id, project, version, status, started_at, finished_at, log
+                f"""
+                SELECT id, project, environment, action, version, status, started_at, finished_at, log
                 FROM deployments
-                WHERE project = ?
+                {where}
                 ORDER BY id DESC
                 LIMIT ?
                 """,
-                (project, limit),
+                params,
             ).fetchall()
         return [DeploymentRecord(*row) for row in rows]
 
@@ -72,6 +91,8 @@ class StateStore:
                 CREATE TABLE IF NOT EXISTS deployments (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     project TEXT NOT NULL,
+                    environment TEXT NOT NULL DEFAULT 'prod',
+                    action TEXT NOT NULL DEFAULT 'deploy',
                     version TEXT,
                     status TEXT NOT NULL,
                     started_at TEXT NOT NULL,
@@ -80,13 +101,27 @@ class StateStore:
                 )
                 """
             )
+            _ensure_column(conn, "deployments", "environment", "TEXT NOT NULL DEFAULT 'prod'")
+            _ensure_column(conn, "deployments", "action", "TEXT NOT NULL DEFAULT 'deploy'")
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_deployments_project_id
                 ON deployments(project, id)
                 """
             )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_deployments_project_environment_id
+                ON deployments(project, environment, id)
+                """
+            )
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

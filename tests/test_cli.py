@@ -45,6 +45,19 @@ def test_cli_deploy_dry_run_and_history(tmp_path: Path, capsys):
     assert "main" in capsys.readouterr().out
 
 
+def test_cli_stop_dry_run_and_history_environment(tmp_path: Path, capsys):
+    project = _project(tmp_path / "project")
+    state_db = tmp_path / "state.db"
+
+    assert main(["stop", str(project), "--state-db", str(state_db), "--dry-run", "--environment", "dev"]) == 0
+    assert "down" in capsys.readouterr().out
+
+    assert main(["history", "myapp", "--state-db", str(state_db), "--environment", "dev"]) == 0
+    output = capsys.readouterr().out
+    assert "dev" in output
+    assert "stop" in output
+
+
 def test_cli_returns_error_for_invalid_project(tmp_path: Path, capsys):
     assert main(["validate", str(tmp_path)]) == 2
 

@@ -23,6 +23,16 @@
 - [ ] Add real Docker Compose integration test gated by an explicit make target.
 - [ ] Decide whether manifests live inside each project or in deployer-managed catalog.
 
+## Core v2
+
+- [x] Use environment-specific override files: `.deployer/prod.override.yml`, `.deployer/dev.override.yml`
+- [x] Track deployment history by project and environment
+- [x] Add `stop` command
+- [x] Add `status` command
+- [ ] Add `logs` command
+- [ ] Move default state DB to `/var/lib/deployer/state.db` in packaged service usage
+- [ ] Run CLI from inside the deployer container through Docker socket proxy
+
 ## Phase 2: Runtime Hardening
 
 - [ ] Add Docker socket proxy compose service for deployer.

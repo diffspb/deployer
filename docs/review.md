@@ -42,6 +42,7 @@ Results:
 - No Docker socket proxy integration yet.
 - No FastAPI API or UI yet.
 - Healthcheck currently checks the first route only.
+- Status command currently shells out to `docker compose ps`; no normalized status model yet.
 
 ## Architecture Review
 
