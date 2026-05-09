@@ -8,11 +8,15 @@ from deployer.manifest import Manifest, Route
 from deployer.platform import DEFAULT_PLATFORM, Platform
 
 
-def build_override(manifest: Manifest, platform: Platform = DEFAULT_PLATFORM) -> dict:
+def build_override(
+    manifest: Manifest,
+    platform: Platform = DEFAULT_PLATFORM,
+    environment: str = "prod",
+) -> dict:
     labels: list[str] = ["traefik.enable=true"]
 
     for route in manifest.routes:
-        labels.extend(_route_labels(manifest, route, platform))
+        labels.extend(_route_labels(manifest, route, platform, environment))
 
     service_config: dict = {
         "labels": labels,
@@ -33,23 +37,33 @@ def build_override(manifest: Manifest, platform: Platform = DEFAULT_PLATFORM) ->
     }
 
 
-def render_override(manifest: Manifest, platform: Platform = DEFAULT_PLATFORM) -> str:
-    return yaml.safe_dump(build_override(manifest, platform), sort_keys=False)
+def render_override(
+    manifest: Manifest,
+    platform: Platform = DEFAULT_PLATFORM,
+    environment: str = "prod",
+) -> str:
+    return yaml.safe_dump(build_override(manifest, platform, environment), sort_keys=False)
 
 
-def write_override(project_dir: Path, manifest: Manifest, platform: Platform = DEFAULT_PLATFORM) -> Path:
+def write_override(
+    project_dir: Path,
+    manifest: Manifest,
+    platform: Platform = DEFAULT_PLATFORM,
+    environment: str = "prod",
+) -> Path:
     deployer_dir = project_dir / ".deployer"
     deployer_dir.mkdir(exist_ok=True)
     path = deployer_dir / "docker-compose.override.yml"
-    path.write_text(render_override(manifest, platform))
+    path.write_text(render_override(manifest, platform, environment))
     return path
 
 
-def _route_labels(manifest: Manifest, route: Route, platform: Platform) -> list[str]:
-    router = route.name or manifest.name
+def _route_labels(manifest: Manifest, route: Route, platform: Platform, environment: str) -> list[str]:
+    base_router = route.name or manifest.name
+    router = base_router if environment == "prod" else f"{base_router}-{environment}"
     service = router
     labels = [
-        f"traefik.http.routers.{router}.rule={_rule(route)}",
+        f"traefik.http.routers.{router}.rule={_rule(route, platform, environment)}",
         f"traefik.http.routers.{router}.entrypoints={platform.entrypoint}",
         f"traefik.http.routers.{router}.tls.certresolver={platform.certresolver}",
         f"traefik.http.routers.{router}.service={service}",
@@ -66,8 +80,17 @@ def _route_labels(manifest: Manifest, route: Route, platform: Platform) -> list[
     return labels
 
 
-def _rule(route: Route) -> str:
-    parts = [f"Host(`{route.host}`)"]
+def route_host(route: Route, platform: Platform = DEFAULT_PLATFORM, environment: str = "prod") -> str:
+    if route.host:
+        return route.host
+    prefix = route.subdomain
+    if environment != "prod":
+        prefix = f"{prefix}.{environment}"
+    return f"{prefix}.{platform.domain}"
+
+
+def _rule(route: Route, platform: Platform, environment: str) -> str:
+    parts = [f"Host(`{route_host(route, platform, environment)}`)"]
     if route.path_prefix:
         parts.append(f"PathPrefix(`{route.path_prefix}`)")
     if route.exclude_path_prefix:

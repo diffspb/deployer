@@ -12,7 +12,7 @@ name: myapp
 service: app
 port: 8000
 routes:
-  - host: myapp.busypage.ru
+  - subdomain: myapp
 """
     )
     return tmp_path

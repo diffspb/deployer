@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "render-override":
             manifest = load_manifest(args.project_dir, manifest_path=args.manifest)
-            print(render_override(manifest), end="")
+            print(render_override(manifest, environment=args.environment), end="")
             return 0
         if args.command == "deploy":
             state = StateStore(args.state_db)
@@ -32,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
                 version=args.version,
                 dry_run=args.dry_run,
                 manifest_path=args.manifest,
+                environment=args.environment,
             )
             print(result.log)
             return 0 if result.status == "success" else 1
@@ -59,12 +60,14 @@ def _parser() -> argparse.ArgumentParser:
     render = subparsers.add_parser("render-override")
     render.add_argument("project_dir", type=Path)
     render.add_argument("--manifest", type=Path)
+    render.add_argument("--environment", choices=["prod", "dev"], default="prod")
 
     deploy = subparsers.add_parser("deploy")
     deploy.add_argument("project_dir", type=Path)
     deploy.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
     deploy.add_argument("--manifest", type=Path)
     deploy.add_argument("--version")
+    deploy.add_argument("--environment", choices=["prod", "dev"], default="prod")
     deploy.add_argument("--dry-run", action="store_true")
 
     history = subparsers.add_parser("history")

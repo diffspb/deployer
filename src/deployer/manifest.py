@@ -11,8 +11,9 @@ from deployer.errors import ManifestError
 
 @dataclass(frozen=True)
 class Route:
-    host: str
     auth: str = "none"
+    host: str | None = None
+    subdomain: str | None = None
     name: str | None = None
     path_prefix: str | None = None
     exclude_path_prefix: str | None = None
@@ -45,6 +46,11 @@ class Manifest:
     @property
     def project_name(self) -> str:
         return self.name
+
+    def project_name_for(self, environment: str) -> str:
+        if environment == "prod":
+            return self.name
+        return f"{self.name}-{environment}"
 
 
 def load_manifest(project_dir: Path, manifest_path: Path | None = None) -> Manifest:
@@ -107,7 +113,12 @@ def validate_compose_files(project_dir: Path, manifest: Manifest) -> None:
 def _parse_route(raw: Any, project_name: str) -> Route:
     if not isinstance(raw, dict):
         raise ManifestError("Each route must be a mapping")
-    host = _required_str(raw, "host")
+    host = _optional_str(raw, "host")
+    subdomain = _optional_str(raw, "subdomain")
+    if not host and not subdomain:
+        raise ManifestError("Each route must define host or subdomain")
+    if host and subdomain:
+        raise ManifestError("Route must not define both host and subdomain")
     auth = str(raw.get("auth", "none"))
     if auth not in {"none", "sso"}:
         raise ManifestError("route.auth must be one of: none, sso")
@@ -129,6 +140,7 @@ def _parse_route(raw: Any, project_name: str) -> Route:
     return Route(
         name=route_name,
         host=host,
+        subdomain=subdomain,
         auth=auth,
         path_prefix=_optional_str(raw, "path_prefix"),
         exclude_path_prefix=_optional_str(raw, "exclude_path_prefix"),

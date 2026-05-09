@@ -69,7 +69,7 @@ compose:
     - docker-compose.prod.yml
 env_file: .env.prod
 routes:
-  - host: tasktrack.busypage.ru
+  - subdomain: tasktrack
     auth: none
     middlewares:
       - secure-headers@file
@@ -90,12 +90,12 @@ compose:
 env_file: .env.prod
 routes:
   - name: cpucol-public
-    host: cpu.busypage.ru
+    subdomain: cpu
     path_prefix: /api/public/
     auth: none
     priority: 20
   - name: cpucol-private
-    host: cpu.busypage.ru
+    subdomain: cpu
     exclude_path_prefix: /api/public/
     auth: sso
     priority: 10

@@ -12,14 +12,14 @@ def test_override_adds_sso_middlewares_and_explicit_service():
             "routes": [
                 {
                     "name": "cpucol-private",
-                    "host": "cpu.busypage.ru",
+                    "subdomain": "cpu",
                     "exclude_path_prefix": "/api/public/",
                     "auth": "sso",
                     "priority": 10,
                 },
                 {
                     "name": "cpucol-public",
-                    "host": "cpu.busypage.ru",
+                    "subdomain": "cpu",
                     "path_prefix": "/api/public/",
                     "auth": "none",
                     "priority": 20,
@@ -48,7 +48,7 @@ def test_render_override_is_yaml():
             "name": "tasktrack",
             "service": "app",
             "port": 8000,
-            "routes": [{"host": "tasktrack.busypage.ru", "middlewares": ["secure-headers@file"]}],
+            "routes": [{"subdomain": "tasktrack", "middlewares": ["secure-headers@file"]}],
         }
     )
 
@@ -56,3 +56,19 @@ def test_render_override_is_yaml():
 
     assert "traefik.http.routers.tasktrack.rule=Host(`tasktrack.busypage.ru`)" in rendered
     assert "secure-headers@file" in rendered
+
+
+def test_render_dev_override_uses_dev_subdomain_and_names():
+    manifest = parse_manifest(
+        {
+            "name": "tasktrack",
+            "service": "app",
+            "port": 8000,
+            "routes": [{"subdomain": "tasktrack"}],
+        }
+    )
+
+    rendered = render_override(manifest, environment="dev")
+
+    assert "traefik.http.routers.tasktrack-dev.rule=Host(`tasktrack.dev.busypage.ru`)" in rendered
+    assert "traefik.http.routers.tasktrack-dev.service=tasktrack-dev" in rendered

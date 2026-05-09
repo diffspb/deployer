@@ -12,13 +12,14 @@ def test_parse_minimal_manifest():
             "name": "myapp",
             "service": "app",
             "port": 8000,
-            "routes": [{"host": "myapp.busypage.ru", "auth": "sso"}],
+            "routes": [{"subdomain": "myapp", "auth": "sso"}],
         }
     )
 
     assert manifest.name == "myapp"
     assert manifest.compose.files == ("docker-compose.yml",)
     assert manifest.routes[0].name == "myapp"
+    assert manifest.routes[0].subdomain == "myapp"
     assert manifest.routes[0].auth == "sso"
 
 
@@ -29,7 +30,7 @@ def test_parse_rejects_invalid_auth():
                 "name": "myapp",
                 "service": "app",
                 "port": 8000,
-                "routes": [{"host": "myapp.busypage.ru", "auth": "password"}],
+                "routes": [{"subdomain": "myapp", "auth": "password"}],
             }
         )
 

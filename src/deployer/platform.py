@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Platform:
+    domain: str = "busypage.ru"
     network: str = "traefik-public"
     entrypoint: str = "websecure"
     certresolver: str = "letsencrypt"

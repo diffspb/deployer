@@ -42,6 +42,7 @@ class DeploymentEngine:
         version: str | None = None,
         dry_run: bool = False,
         manifest_path: Path | None = None,
+        environment: str = "prod",
     ) -> DeployResult:
         project_dir = project_dir.resolve()
         manifest = load_manifest(project_dir, manifest_path=manifest_path)
@@ -52,9 +53,9 @@ class DeploymentEngine:
         lock = _project_lock(manifest.project_name)
         with lock:
             try:
-                override_path = write_override(project_dir, manifest)
+                override_path = write_override(project_dir, manifest, environment=environment)
                 log_parts.append(f"Generated override: {override_path}")
-                command = compose_command(manifest, override_path)
+                command = compose_command(manifest, override_path, environment=environment)
                 log_parts.append(f"Command: {' '.join(command)}")
 
                 if dry_run:
@@ -62,7 +63,7 @@ class DeploymentEngine:
                 else:
                     result = self.runner.run(command, cwd=project_dir)
                     log_parts.append(result.output)
-                    ok, message = self.health_checker(manifest)
+                    ok, message = self.health_checker(manifest, environment=environment)
                     log_parts.append(message)
                     if not ok:
                         raise RuntimeError(message)
@@ -80,8 +81,8 @@ class DeploymentEngine:
                 return DeployResult(deployment_id, manifest.project_name, "failed", log, override_path)
 
 
-def compose_command(manifest: Manifest, override_path: Path) -> list[str]:
-    command = ["docker", "compose", "-p", manifest.project_name]
+def compose_command(manifest: Manifest, override_path: Path, environment: str = "prod") -> list[str]:
+    command = ["docker", "compose", "-p", manifest.project_name_for(environment)]
     for file in manifest.compose.files:
         command.extend(["-f", file])
     command.extend(["-f", str(override_path), "up", "-d", "--build"])

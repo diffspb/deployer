@@ -7,7 +7,7 @@ compose:
     - docker-compose.prod.yml
 env_file: .env.prod
 routes:
-  - host: tasktrack.busypage.ru
+  - subdomain: tasktrack
     auth: none
     middlewares:
       - secure-headers@file

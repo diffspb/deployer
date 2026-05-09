@@ -13,7 +13,7 @@ def test_compose_command_includes_all_files():
             "service": "app",
             "port": 8000,
             "compose": {"files": ["docker-compose.yml", "docker-compose.prod.yml"]},
-            "routes": [{"host": "myapp.busypage.ru"}],
+            "routes": [{"subdomain": "myapp"}],
         }
     )
 
@@ -34,6 +34,9 @@ def test_compose_command_includes_all_files():
         "-d",
         "--build",
     ]
+
+    dev_command = compose_command(manifest, Path(".deployer/docker-compose.override.yml"), environment="dev")
+    assert dev_command[3] == "myapp-dev"
 
 
 def test_dry_run_deploy_generates_override_and_history(tmp_path: Path):

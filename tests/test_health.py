@@ -10,7 +10,7 @@ def _manifest():
             "name": "myapp",
             "service": "app",
             "port": 8000,
-            "routes": [{"host": "myapp.busypage.ru"}],
+            "routes": [{"subdomain": "myapp"}],
             "healthcheck": {"path": "/health"},
         }
     )
@@ -18,6 +18,7 @@ def _manifest():
 
 def test_healthcheck_url():
     assert healthcheck_url(_manifest()) == "http://myapp.busypage.ru/health"
+    assert healthcheck_url(_manifest(), environment="dev") == "http://myapp.dev.busypage.ru/health"
 
 
 def test_check_health_success(monkeypatch):

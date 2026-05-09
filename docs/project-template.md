@@ -49,7 +49,7 @@ compose:
     - docker-compose.prod.yml
 env_file: .env.prod
 routes:
-  - host: myapp.busypage.ru
+  - subdomain: myapp
     auth: sso
 healthcheck:
   path: /health
