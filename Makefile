@@ -5,7 +5,7 @@ DEV_RUNTIME_DIR ?= .deployer/runtime
 TEST_STATE_DB ?= /tmp/deployer-state.sqlite3
 TEST_RUNTIME_DIR ?= /tmp/deployer-runtime
 
-.PHONY: venv install test coverage validate-samples render-tasktrack render-cpucol docker-build reset-dev reset-test clean
+.PHONY: venv install test coverage api validate-samples render-tasktrack render-cpucol docker-build reset-dev reset-test clean
 
 venv:
 	python3 -m venv .venv
@@ -19,6 +19,9 @@ test:
 
 coverage:
 	$(PYTHON) -m pytest --cov=deployer --cov-report=term-missing
+
+api:
+	$(PYTHON) -m deployer.server
 
 validate-samples:
 	$(PYTHON) -m deployer.cli validate /home/sanek/projects/claudecode/tasktrack_project --manifest docs/sample-manifests/tasktrack.deployer.yml

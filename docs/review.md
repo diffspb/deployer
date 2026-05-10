@@ -142,3 +142,32 @@ Remaining risks:
 
 - Reset targets intentionally do not stop or remove Docker containers.
 - Service history is still text output; API should expose structured records.
+
+## API Skeleton Review
+
+Date: 2026-05-10
+
+Commands run:
+
+```bash
+.venv/bin/python -m pytest --cov=deployer --cov-report=term-missing
+```
+
+Results:
+
+- 40 tests passed.
+- Coverage: 87.11%.
+- Coverage threshold: 80%.
+
+Implemented behavior:
+
+- FastAPI app exposes service catalog, env, history, runtime action, status, and logs endpoints.
+- API config uses `DEPLOYER_STATE_DB` and `DEPLOYER_RUNTIME_DIR`.
+- `deployer.server` now runs the FastAPI app through Uvicorn.
+- API responses are structured JSON for future UI consumption.
+
+Remaining risks:
+
+- Runtime actions are synchronous; long deploys will block the request until command completion.
+- Logs endpoint returns command output, not a streaming response.
+- API authentication is expected to be handled by the platform SSO layer initially.

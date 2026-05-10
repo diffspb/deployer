@@ -3,10 +3,10 @@
 The deployer is split into a reusable engine and thin interfaces.
 
 ```text
-CLI / future FastAPI UI
+CLI / future UI
         |
         v
-ServiceCatalog
+FastAPI API / ServiceCatalog
         |
         v
 DeploymentEngine
@@ -29,6 +29,7 @@ DeploymentEngine
 - The same engine must be reusable from CLI and FastAPI.
 - The catalog owns service/source/environment state.
 - The engine remains path-capable and does not know how sources are fetched.
+- The UI talks to the FastAPI API, not to Docker and not to engine internals.
 
 ## Current CLI
 
@@ -116,7 +117,9 @@ Path mode:
 
 ## Future FastAPI UI
 
-The UI should not call Docker directly. It should call the catalog/service layer, which then calls the engine.
+The API layer is implemented as the contract for the future UI. See `docs/api.md`.
+
+The UI should not call Docker directly. It should call the API, which then calls the catalog/service layer, which then calls the engine.
 
 The target workflow is service-based, not path-based. See `docs/service-catalog-plan.md`.
 

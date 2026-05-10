@@ -63,7 +63,8 @@
 
 ## Phase 3: UI
 
-- [ ] Add minimal FastAPI API around the engine.
+- [x] Add minimal FastAPI API around the engine.
+- [x] Document API contract in `docs/api.md`.
 - [ ] Add project list screen.
 - [ ] Add deployment history screen.
 - [ ] Add deploy action and log viewer.

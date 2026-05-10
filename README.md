@@ -17,6 +17,7 @@ Use the local virtual environment directly. Do not rely on shell activation.
 make install
 make test
 make coverage
+make api
 ```
 
 Useful local checks:
@@ -53,6 +54,7 @@ Current implementation includes the deployer engine and the first service catalo
 - Service catalog with `git` and `local` sources.
 - Managed runtime layout under `/var/lib/deployer/services/<name>/`.
 - Environment variable storage and generated env files.
+- FastAPI JSON API for future Web UI.
 
 Catalog workflow:
 
@@ -75,5 +77,6 @@ See:
 
 - [Platform Contract](docs/platform-contract.md)
 - [Architecture](docs/architecture.md)
+- [API](docs/api.md)
 - [Tasks](docs/tasks.md)
 - [Project Template](docs/project-template.md)
