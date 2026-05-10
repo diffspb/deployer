@@ -679,6 +679,11 @@ button:disabled {
   margin-top: 4px;
 }
 
+.failure-note {
+  color: var(--red);
+  font-size: 12px;
+}
+
 .danger-card {
   border-color: color-mix(in oklch, var(--red) 20%, var(--border));
 }

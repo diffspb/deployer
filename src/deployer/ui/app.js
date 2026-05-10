@@ -130,6 +130,16 @@ function latestRuntimeJob(serviceName, environment) {
   return state.jobs.find((job) => job.service === serviceName && job.environment === environment);
 }
 
+function latestVisibleFailure(serviceName, environment) {
+  const job = state.jobs.find(
+    (item) =>
+      item.service === serviceName &&
+      item.environment === environment &&
+      ["success", "failed"].includes(item.status),
+  );
+  return job?.status === "failed" ? job : null;
+}
+
 function activeJobForRuntime(serviceName, environment) {
   return state.jobs.find(
     (job) =>
@@ -171,7 +181,7 @@ function parseRuntimeStatus(serviceName, environment, response) {
     loading: false,
     available: response?.status === "success",
     running,
-    state: running ? "running" : stopped ? "stopped" : "unknown",
+    state: running ? "running" : stopped || response?.status === "success" ? "stopped" : "unknown",
     health,
     raw,
   };
@@ -442,6 +452,7 @@ function renderServicesView() {
 function renderServiceTableRow(service, environment) {
   const summary = runtimeStatus(service.name, environment);
   const activeJob = activeJobForRuntime(service.name, environment);
+  const visibleFailure = latestVisibleFailure(service.name, environment);
   const canOpenLink = summary.running;
   const publicUrl = runtimeUrl(service.name, environment);
   const menuOpen =
@@ -466,6 +477,7 @@ function renderServiceTableRow(service, environment) {
       <div>
         ${renderRuntimeStatus(service.name, environment)}
         ${activeJob ? `<div class="subtle mono top-gap">${escapeHtml(activeJob.action)}</div>` : ""}
+        ${!activeJob && visibleFailure ? `<div class="failure-note top-gap">last ${escapeHtml(visibleFailure.action)} failed</div>` : ""}
       </div>
       <div>${renderVersionCell(service.name, environment)}</div>
       <div class="quick-actions">
