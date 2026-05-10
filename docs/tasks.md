@@ -69,13 +69,13 @@
 - [x] Add project list screen.
 - [x] Add deployment history screen.
 - [x] Add deploy action and log viewer.
-- [ ] Redesign UI around explicit runtime targets: `service/prod` and `service/dev`.
-- [ ] Replace service cards with a runtime-target-first service table/list.
-- [ ] Add `RuntimeCard(service, environment)` with scoped Deploy/Restart/Stop/Down/Logs/Env/History actions.
-- [ ] Remove mixed service-level runtime actions from the UI.
-- [ ] Replace deploy prompt with runtime-scoped deploy modal.
-- [ ] Make env editor scoped to one runtime target and remove the global env selector.
-- [ ] Add global Jobs page with service/environment filters.
+- [x] Redesign UI around explicit runtime targets: `service/prod` and `service/dev`.
+- [x] Replace service cards with a runtime-target-first service table/list.
+- [x] Add `RuntimeCard(service, environment)` with scoped Deploy/Restart/Stop/Down/Logs/Env/History actions.
+- [x] Remove mixed service-level runtime actions from the UI.
+- [x] Replace deploy prompt with runtime-scoped deploy modal.
+- [x] Make env editor scoped to one runtime target and remove the global env selector.
+- [x] Add global Jobs page with service/environment filters.
 - [ ] Add override preview and validation errors.
 - [ ] Add persistent UI filters/search and better empty/error states.
 - [ ] Add mobile navigation for small screens.

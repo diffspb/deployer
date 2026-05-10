@@ -82,6 +82,55 @@ make api
 Open `http://127.0.0.1:8000/`. The UI uses the same API contract as external clients and can add services,
 edit environment variables, run deploy/stop/down/restart jobs, poll job status, and inspect recent logs.
 
+## Server Runbook
+
+Deployer is built from this repository on the server and started from the infrastructure repository.
+
+Stop deployer:
+
+```bash
+cd ~/simple_infra
+make deployer-down
+```
+
+Start deployer:
+
+```bash
+cd ~/simple_infra
+make deployer-up
+```
+
+Rebuild deployer after `git pull` in `~/paas_deployer`:
+
+```bash
+cd ~/paas_deployer
+docker build -t home-paas-deployer:latest .
+cd ~/simple_infra
+make deployer-down
+make deployer-up
+```
+
+If compose/env configuration changed, re-render deployer config before start:
+
+```bash
+cd ~/simple_infra
+make deployer-config
+make deployer-down
+make deployer-up
+```
+
+Typical full update sequence on the server:
+
+```bash
+cd ~/paas_deployer
+git pull
+docker build -t home-paas-deployer:latest .
+cd ~/simple_infra
+make deployer-config
+make deployer-down
+make deployer-up
+```
+
 See:
 
 - [Platform Contract](docs/platform-contract.md)
