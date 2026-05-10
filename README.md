@@ -27,6 +27,16 @@ make render-tasktrack
 make render-cpucol
 ```
 
+Reset local/test deployer state:
+
+```bash
+make reset-dev
+make reset-test
+```
+
+`reset-dev` removes `DEV_STATE_DB` and `DEV_RUNTIME_DIR`, defaulting to `.deployer/state.db` and `.deployer/runtime`.
+`reset-test` removes `/tmp/deployer-state.sqlite3` and `/tmp/deployer-runtime`.
+
 ## MVP Scope
 
 Current implementation includes the deployer engine and the first service catalog:
@@ -51,6 +61,7 @@ deployer services add myapp --git-url <url> --state-db /var/lib/deployer/state.d
 deployer services add-local myapp --path /path/to/project --state-db /var/lib/deployer/state.db
 deployer env set myapp prod KEY=value --state-db /var/lib/deployer/state.db
 deployer deploy myapp --environment prod --ref main --state-db /var/lib/deployer/state.db
+deployer history myapp --environment prod --state-db /var/lib/deployer/state.db
 deployer status myapp --environment prod --state-db /var/lib/deployer/state.db
 deployer stop myapp --environment prod --state-db /var/lib/deployer/state.db
 deployer down myapp --environment prod --state-db /var/lib/deployer/state.db

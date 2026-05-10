@@ -19,7 +19,7 @@
 
 - [ ] Add DB-level project lock before running deployer as a long-lived service.
 - [ ] Add rollback command based on previous successful deployment record.
-- [ ] Add git source support with `git ls-remote`, clone, fetch, checkout.
+- [x] Add git source support with `git ls-remote`, clone, fetch, checkout.
 - [ ] Add real Docker Compose integration test gated by an explicit make target.
 - [ ] Decide whether manifests live inside each project or in deployer-managed catalog.
 
@@ -48,9 +48,10 @@
 - [x] Add `restart` command
 - [x] Add `logs` command
 - [x] Split `stop` and `down` command semantics
-- [ ] Add service-based history output enriched with current ref/commit
-- [ ] Add conflict-safe duplicate service handling with clearer errors
-- [ ] Add integration tests for git source using a real local bare repository
+- [x] Add service-based history output enriched with current ref/commit
+- [x] Add conflict-safe duplicate service handling with clearer errors
+- [x] Add integration tests for git source using a real local bare repository
+- [x] Add Makefile reset targets for local/test state
 
 ## Phase 2: Runtime Hardening
 

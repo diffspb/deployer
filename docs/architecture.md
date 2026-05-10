@@ -46,6 +46,7 @@ deployer env set myapp prod KEY=value
 deployer env unset myapp prod KEY
 deployer env render myapp prod
 deployer deploy myapp --environment prod --ref main --state-db /var/lib/deployer/state.db
+deployer history myapp --environment prod --state-db /var/lib/deployer/state.db
 deployer stop myapp --environment prod --state-db /var/lib/deployer/state.db
 deployer down myapp --environment prod --state-db /var/lib/deployer/state.db
 deployer restart myapp --environment prod --state-db /var/lib/deployer/state.db
@@ -75,6 +76,15 @@ Runtime command semantics:
 - `restart` runs `docker compose restart`.
 - `status` runs `docker compose ps`.
 - `logs` runs `docker compose logs --tail <n>`.
+
+Catalog `history` prints current service environment metadata before deployment records:
+
+```text
+service: myapp
+source: git	git@example.com/myapp.git
+current: prod	version=main	ref=main	commit=abc123	last_deployment=42
+42	prod	deploy	success	main	2026-05-10T...
+```
 
 ## Deployment Flow
 

@@ -125,6 +125,12 @@ def test_cli_service_catalog_local_workflow(tmp_path: Path, capsys):
     assert "Dry run" in output
     assert str(runtime_dir / "services" / "myapp" / "overrides" / "prod.override.yml") in output
 
+    assert main(["history", "myapp", "--state-db", str(state_db), "--runtime-dir", str(runtime_dir)]) == 0
+    output = capsys.readouterr().out
+    assert "service: myapp" in output
+    assert "current: prod" in output
+    assert "ref=main" in output
+
     assert (
         main(
             [

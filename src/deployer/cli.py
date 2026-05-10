@@ -137,11 +137,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result.status == "success" else 1
         if args.command == "history":
             state = StateStore(args.state_db)
-            for record in state.history(args.project, environment=args.environment, limit=args.limit):
-                print(
-                    f"{record.id}\t{record.environment}\t{record.action}\t"
-                    f"{record.status}\t{record.version or '-'}\t{record.started_at}"
-                )
+            catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+            if _is_service_target(args.project, state):
+                _print_service_history(catalog, args.project, args.environment, args.limit)
+            else:
+                for record in state.history(args.project, environment=args.environment, limit=args.limit):
+                    print(_format_history_record(record))
             return 0
     except DeployerError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -206,6 +207,27 @@ def _handle_env(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
         print(catalog.render_env_file(args.service, args.environment))
         return 0
     raise DeployerError("Unknown env command")
+
+
+def _print_service_history(catalog: ServiceCatalog, service_name: str, environment: str | None, limit: int) -> None:
+    history = catalog.history(service_name, environment=environment, limit=limit)
+    print(f"service: {history.service.name}")
+    print(f"source: {history.service.source_type}\t{history.service.source_url or history.service.source_path}")
+    for env in history.environments:
+        print(
+            f"current: {env.name}\tversion={env.current_version or '-'}\t"
+            f"ref={env.current_ref or '-'}\tcommit={env.current_commit or '-'}\t"
+            f"last_deployment={env.last_deployment_id or '-'}"
+        )
+    for record in history.records:
+        print(_format_history_record(record))
+
+
+def _format_history_record(record) -> str:
+    return (
+        f"{record.id}\t{record.environment}\t{record.action}\t"
+        f"{record.status}\t{record.version or '-'}\t{record.started_at}"
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -273,6 +295,7 @@ def _parser() -> argparse.ArgumentParser:
     history = subparsers.add_parser("history")
     history.add_argument("project")
     history.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
+    history.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
     history.add_argument("--environment", choices=["prod", "dev"])
     history.add_argument("--limit", type=int, default=20)
 
@@ -341,6 +364,10 @@ def _parser() -> argparse.ArgumentParser:
 
 def _is_path_target(target: str) -> bool:
     return target.startswith(".") or target.startswith("/") or Path(target).exists()
+
+
+def _is_service_target(target: str, state: StateStore) -> bool:
+    return state.get_service(target) is not None
 
 
 def _add_catalog_options(parser: argparse.ArgumentParser) -> None:

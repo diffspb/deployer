@@ -120,3 +120,25 @@ Remaining risks:
 
 - `logs` is currently command-output based, not streaming.
 - `restart` does not run a post-restart healthcheck yet.
+
+## Catalog Hardening Review
+
+Date: 2026-05-10
+
+Commands run:
+
+```bash
+.venv/bin/python -m pytest --cov=deployer --cov-report=term-missing
+```
+
+Implemented behavior:
+
+- Service-based `history` now prints current environment version/ref/commit before deployment records.
+- Duplicate service creation returns a catalog-level error instead of leaking a raw SQLite constraint error.
+- Git source support is covered by an integration test using a real local bare repository.
+- `make reset-dev` and `make reset-test` reset local/test deployer state and runtime directories.
+
+Remaining risks:
+
+- Reset targets intentionally do not stop or remove Docker containers.
+- Service history is still text output; API should expose structured records.

@@ -1,6 +1,9 @@
 from pathlib import Path
+import subprocess
 
-from deployer.catalog import ServiceCatalog, render_env
+import pytest
+
+from deployer.catalog import CatalogError, ServiceCatalog, render_env
 from deployer.engine import DeploymentEngine
 from deployer.runner import CommandResult
 from deployer.state import StateStore
@@ -51,6 +54,22 @@ def test_catalog_deploys_local_service_through_engine_dry_run(tmp_path: Path):
     env = state.require_environment("myapp", "dev")
     assert env.current_ref == "main"
     assert env.last_deployment_id == result.deployment_id
+
+
+def test_catalog_history_includes_environment_summary(tmp_path: Path):
+    project = _project(tmp_path / "project")
+    state = StateStore(tmp_path / "state.db")
+    catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
+    catalog.add_local("myapp", project)
+    engine = DeploymentEngine(state)
+    result = catalog.deploy("myapp", engine, environment="prod", ref="main", dry_run=True)
+
+    history = catalog.history("myapp", environment="prod")
+
+    assert history.service.name == "myapp"
+    assert history.environments[0].current_ref == "main"
+    assert history.environments[0].last_deployment_id == result.deployment_id
+    assert history.records[0].action == "deploy"
 
 
 def test_render_env_quotes_unsafe_values():
@@ -124,3 +143,52 @@ def test_catalog_git_source_uses_runner_for_clone_refs_and_checkout(tmp_path: Pa
     assert result.status == "success"
     assert state.require_environment("myapp", "prod").current_commit == "abc123"
     assert ("git", "fetch", "--all", "--tags") in runner.commands
+
+
+def test_catalog_rejects_duplicate_service_with_clear_error(tmp_path: Path):
+    project = _project(tmp_path / "project")
+    catalog = ServiceCatalog(StateStore(tmp_path / "state.db"), runtime_dir=tmp_path / "runtime")
+    catalog.add_local("myapp", project)
+
+    with pytest.raises(CatalogError, match="Service already exists: myapp"):
+        catalog.add_local("myapp", project)
+
+
+def test_catalog_git_source_with_real_local_bare_repository(tmp_path: Path):
+    source = _project(tmp_path / "source")
+    _git(source, "init")
+    _git(source, "config", "user.email", "test@example.com")
+    _git(source, "config", "user.name", "Test User")
+    _git(source, "add", ".")
+    _git(source, "commit", "-m", "initial")
+    first_commit = _git(source, "rev-parse", "HEAD")
+    default_branch = _git(source, "branch", "--show-current")
+    _git(source, "tag", "v1")
+    bare = tmp_path / "repo.git"
+    _git(tmp_path, "clone", "--bare", str(source), str(bare))
+
+    state = StateStore(tmp_path / "state.db")
+    catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
+    service = catalog.add_git("myapp", str(bare), default_branch=default_branch)
+    refs = catalog.refs("myapp")
+    result = catalog.deploy("myapp", DeploymentEngine(state), environment="prod", ref="v1", dry_run=True)
+
+    assert service.source_type == "git"
+    assert f"refs/heads/{default_branch}" in refs
+    assert "refs/tags/v1" in refs
+    assert result.status == "success"
+    env = state.require_environment("myapp", "prod")
+    assert env.current_ref == "v1"
+    assert env.current_commit == first_commit
+
+
+def _git(cwd: Path, *args: str) -> str:
+    process = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    return process.stdout.strip()

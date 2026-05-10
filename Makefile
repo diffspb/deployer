@@ -1,7 +1,11 @@
 PYTHON = .venv/bin/python
 PIP = .venv/bin/pip
+DEV_STATE_DB ?= .deployer/state.db
+DEV_RUNTIME_DIR ?= .deployer/runtime
+TEST_STATE_DB ?= /tmp/deployer-state.sqlite3
+TEST_RUNTIME_DIR ?= /tmp/deployer-runtime
 
-.PHONY: venv install test coverage validate-samples render-tasktrack render-cpucol docker-build clean
+.PHONY: venv install test coverage validate-samples render-tasktrack render-cpucol docker-build reset-dev reset-test clean
 
 venv:
 	python3 -m venv .venv
@@ -31,6 +35,16 @@ status-cpucol:
 
 docker-build:
 	docker build -t home-paas-deployer:latest .
+
+reset-dev:
+	rm -f "$(DEV_STATE_DB)"
+	rm -rf "$(DEV_RUNTIME_DIR)"
+	@echo "Reset dev deployer state: $(DEV_STATE_DB), $(DEV_RUNTIME_DIR)"
+
+reset-test:
+	rm -f "$(TEST_STATE_DB)"
+	rm -rf "$(TEST_RUNTIME_DIR)"
+	@echo "Reset test deployer state: $(TEST_STATE_DB), $(TEST_RUNTIME_DIR)"
 
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

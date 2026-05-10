@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from deployer.engine import CommandResult, DeployResult, DeploymentEngine
 from deployer.errors import DeployerError
 from deployer.manifest import load_manifest
 from deployer.runner import CommandRunner
-from deployer.state import EnvironmentRecord, ServiceRecord, StateStore
+from deployer.state import DeploymentRecord, EnvironmentRecord, ServiceRecord, StateStore
 
 
 DEFAULT_RUNTIME_DIR = Path("/var/lib/deployer")
@@ -29,6 +30,13 @@ class ServiceRuntime:
     commit_hash: str | None
 
 
+@dataclass(frozen=True)
+class ServiceHistory:
+    service: ServiceRecord
+    environments: tuple[EnvironmentRecord, ...]
+    records: tuple[DeploymentRecord, ...]
+
+
 class CatalogError(DeployerError):
     pass
 
@@ -46,17 +54,21 @@ class ServiceCatalog:
 
     def add_local(self, name: str, path: Path) -> ServiceRecord:
         _validate_service_name(name)
+        self._ensure_service_absent(name)
         project_dir = path.resolve()
         if not project_dir.exists():
             raise CatalogError(f"Local source does not exist: {project_dir}")
         load_manifest(project_dir)
         try:
             return self.state.add_service(name, "local", str(project_dir))
-        except Exception as exc:
+        except sqlite3.IntegrityError as exc:
+            raise CatalogError(f"Service already exists: {name}") from exc
+        except ValueError as exc:
             raise CatalogError(f"Cannot add service {name}: {exc}") from exc
 
     def add_git(self, name: str, git_url: str, default_branch: str | None = None) -> ServiceRecord:
         _validate_service_name(name)
+        self._ensure_service_absent(name)
         service_dir = self.service_dir(name)
         repo_dir = service_dir / "repo"
         if repo_dir.exists():
@@ -68,11 +80,25 @@ class ServiceCatalog:
         load_manifest(repo_dir)
         try:
             return self.state.add_service(name, "git", str(repo_dir), source_url=git_url, default_branch=default_branch)
-        except Exception as exc:
+        except sqlite3.IntegrityError as exc:
+            raise CatalogError(f"Service already exists: {name}") from exc
+        except ValueError as exc:
             raise CatalogError(f"Cannot add service {name}: {exc}") from exc
 
     def list_services(self) -> list[ServiceRecord]:
         return self.state.list_services()
+
+    def history(
+        self,
+        service_name: str,
+        environment: str | None = None,
+        limit: int = 20,
+    ) -> ServiceHistory:
+        service = self.get_service(service_name)
+        environments = ("prod", "dev") if environment is None else (environment,)
+        env_records = tuple(self.get_environment(service_name, item) for item in environments)
+        records = tuple(self.state.history(service.name, environment=environment, limit=limit))
+        return ServiceHistory(service, env_records, records)
 
     def get_service(self, name: str) -> ServiceRecord:
         try:
@@ -268,6 +294,10 @@ class ServiceCatalog:
 
     def service_dir(self, name: str) -> Path:
         return self.runtime_dir / "services" / name
+
+    def _ensure_service_absent(self, name: str) -> None:
+        if self.state.get_service(name) is not None:
+            raise CatalogError(f"Service already exists: {name}")
 
 
 def render_env(env_vars: dict[str, str]) -> str:
