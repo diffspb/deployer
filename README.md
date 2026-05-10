@@ -54,7 +54,7 @@ Current implementation includes the deployer engine and the first service catalo
 - Service catalog with `git` and `local` sources.
 - Managed runtime layout under `/var/lib/deployer/services/<name>/`.
 - Environment variable storage and generated env files.
-- FastAPI JSON API for future Web UI.
+- FastAPI JSON API and a minimal Web UI.
 
 Catalog workflow:
 
@@ -72,6 +72,15 @@ deployer logs myapp --environment prod --tail 200 --state-db /var/lib/deployer/s
 ```
 
 `stop` keeps containers stopped. Use `down` when containers should be removed.
+
+Web UI:
+
+```bash
+make api
+```
+
+Open `http://127.0.0.1:8000/`. The UI uses the same API contract as external clients and can add services,
+edit environment variables, run deploy/stop/down/restart jobs, poll job status, and inspect recent logs.
 
 See:
 

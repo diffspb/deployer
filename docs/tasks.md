@@ -66,10 +66,12 @@
 - [x] Add minimal FastAPI API around the engine.
 - [x] Document API contract in `docs/api.md`.
 - [x] Add API job model for deploy/stop/down/restart polling.
-- [ ] Add project list screen.
-- [ ] Add deployment history screen.
-- [ ] Add deploy action and log viewer.
+- [x] Add project list screen.
+- [x] Add deployment history screen.
+- [x] Add deploy action and log viewer.
 - [ ] Add override preview and validation errors.
+- [ ] Add persistent UI filters/search and better empty/error states.
+- [ ] Add mobile navigation for small screens.
 
 ## Architecture Review Checklist
 

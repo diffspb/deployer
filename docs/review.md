@@ -200,3 +200,33 @@ Remaining risks:
 - Background execution currently uses FastAPI `BackgroundTasks`, which is acceptable for a single-process MVP but not a durable queue.
 - Job logs are stored as final command output, not streamed incrementally.
 - There is no DB-level per-service job lock yet; engine still has an in-process lock.
+
+## Web UI MVP Review
+
+Date: 2026-05-10
+
+Commands run:
+
+```bash
+.venv/bin/python -m pytest --cov=deployer --cov-report=term-missing
+```
+
+Results:
+
+- 41 tests passed.
+- Coverage: 86.42%.
+- Coverage threshold: 80%.
+
+Implemented behavior:
+
+- `/` serves a minimal deployer Web UI from the FastAPI service.
+- `/ui/*` serves packaged static assets.
+- UI can list services, open a service detail panel, add git/local services, edit environment variables, run deploy/stop/down/restart jobs, poll job status, and show recent job/log output.
+- Visual direction follows the TaskTrack prototype density and component language, but keeps sidebar/background colors aligned for better dark theme behavior.
+
+Remaining risks:
+
+- UI is vanilla JavaScript and intentionally lightweight; larger flows may justify a dedicated frontend build later.
+- Deploy ref selection currently uses a browser prompt, not a structured branch/tag picker.
+- Runtime logs are fetched as command output snapshots, not streamed.
+- There is no end-to-end browser test yet; coverage verifies that the shell and static assets are served.

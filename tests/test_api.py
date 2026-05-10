@@ -35,7 +35,13 @@ def test_api_health_and_root(tmp_path: Path):
     client = _client(tmp_path)
 
     assert client.get("/api/health").json() == {"status": "ok"}
-    assert client.get("/").json()["service"] == "home-paas-deployer"
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "deployer-root" in response.text
+
+    response = client.get("/ui/app.js")
+    assert response.status_code == 200
+    assert "loadAll" in response.text
 
 
 def test_api_service_local_env_deploy_history_and_delete(tmp_path: Path):

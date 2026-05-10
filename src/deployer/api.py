@@ -4,7 +4,9 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from deployer.catalog import CatalogError, ServiceCatalog
@@ -42,6 +44,8 @@ class EnvSetRequest(BaseModel):
 def create_app(config: DeployerConfig | None = None) -> FastAPI:
     app = FastAPI(title="Home PaaS Deployer API")
     app.state.config = config
+    ui_dir = Path(__file__).parent / "ui"
+    app.mount("/ui", StaticFiles(directory=ui_dir), name="ui")
 
     @app.exception_handler(CatalogError)
     async def catalog_error_handler(request: Request, exc: CatalogError):
@@ -56,8 +60,8 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/")
-    def root() -> dict[str, str]:
-        return {"service": "home-paas-deployer", "status": "running", "ui": "not implemented"}
+    def root() -> FileResponse:
+        return FileResponse(ui_dir / "index.html")
 
     @app.get("/api/services")
     def list_services(catalog: CatalogDep) -> list[dict]:
