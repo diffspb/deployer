@@ -171,3 +171,32 @@ Remaining risks:
 - Runtime actions are synchronous; long deploys will block the request until command completion.
 - Logs endpoint returns command output, not a streaming response.
 - API authentication is expected to be handled by the platform SSO layer initially.
+
+## API Job Model Review
+
+Date: 2026-05-10
+
+Commands run:
+
+```bash
+.venv/bin/python -m pytest --cov=deployer --cov-report=term-missing
+```
+
+Results:
+
+- 41 tests passed.
+- Coverage: 86.38%.
+- Coverage threshold: 80%.
+
+Implemented behavior:
+
+- Runtime-changing API actions now create deployment jobs and return HTTP `202`.
+- `GET /api/jobs` lists recent jobs with optional service/environment filters.
+- `GET /api/jobs/{job_id}` returns job status, timestamps, deployment id, logs, and error text.
+- Deploy/stop/down/restart execution remains inside catalog/engine; API only schedules and reports jobs.
+
+Remaining risks:
+
+- Background execution currently uses FastAPI `BackgroundTasks`, which is acceptable for a single-process MVP but not a durable queue.
+- Job logs are stored as final command output, not streamed incrementally.
+- There is no DB-level per-service job lock yet; engine still has an in-process lock.

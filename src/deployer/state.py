@@ -47,6 +47,24 @@ class EnvironmentRecord:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class JobRecord:
+    id: int
+    service: str
+    environment: str
+    action: str
+    status: str
+    ref: str | None
+    version: str | None
+    dry_run: bool
+    deployment_id: int | None
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+    log: str
+    error: str | None
+
+
 class StateStore:
     def __init__(self, path: Path):
         self.path = path
@@ -70,6 +88,102 @@ class StateStore:
                 (project, environment, action, version, now),
             )
             return int(cursor.lastrowid)
+
+    def create_job(
+        self,
+        service: str,
+        environment: str,
+        action: str,
+        ref: str | None = None,
+        version: str | None = None,
+        dry_run: bool = False,
+    ) -> int:
+        now = _now()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO deployment_jobs(
+                    service, environment, action, status, ref, version, dry_run, created_at, log
+                )
+                VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, '')
+                """,
+                (service, environment, action, ref, version, int(dry_run), now),
+            )
+            return int(cursor.lastrowid)
+
+    def start_job(self, job_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE deployment_jobs
+                SET status = 'running', started_at = ?
+                WHERE id = ?
+                """,
+                (_now(), job_id),
+            )
+
+    def finish_job(
+        self,
+        job_id: int,
+        status: str,
+        log: str,
+        deployment_id: int | None = None,
+        error: str | None = None,
+    ) -> None:
+        if status not in {"success", "failed"}:
+            raise ValueError("status must be success or failed")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE deployment_jobs
+                SET status = ?, deployment_id = ?, finished_at = ?, log = ?, error = ?
+                WHERE id = ?
+                """,
+                (status, deployment_id, _now(), log, error, job_id),
+            )
+
+    def get_job(self, job_id: int) -> JobRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, service, environment, action, status, ref, version, dry_run,
+                       deployment_id, created_at, started_at, finished_at, log, error
+                FROM deployment_jobs
+                WHERE id = ?
+                """,
+                (job_id,),
+            ).fetchone()
+        return _job_record(row) if row else None
+
+    def list_jobs(
+        self,
+        service: str | None = None,
+        environment: str | None = None,
+        limit: int = 50,
+    ) -> list[JobRecord]:
+        where = []
+        params: list[object] = []
+        if service:
+            where.append("service = ?")
+            params.append(service)
+        if environment:
+            where.append("environment = ?")
+            params.append(environment)
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, service, environment, action, status, ref, version, dry_run,
+                       deployment_id, created_at, started_at, finished_at, log, error
+                FROM deployment_jobs
+                {where_sql}
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [_job_record(row) for row in rows]
 
     def add_service(
         self,
@@ -315,6 +429,33 @@ class StateStore:
                 ON environments(service_id, name)
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS deployment_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    service TEXT NOT NULL,
+                    environment TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    ref TEXT,
+                    version TEXT,
+                    dry_run INTEGER NOT NULL DEFAULT 0,
+                    deployment_id INTEGER,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    log TEXT NOT NULL DEFAULT '',
+                    error TEXT,
+                    FOREIGN KEY(deployment_id) REFERENCES deployments(id) ON DELETE SET NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_deployment_jobs_service_id
+                ON deployment_jobs(service, id)
+                """
+            )
 
 
 def _now() -> str:
@@ -340,4 +481,23 @@ def _environment_record(row) -> EnvironmentRecord:
         last_deployment_id=row[8],
         created_at=row[9],
         updated_at=row[10],
+    )
+
+
+def _job_record(row) -> JobRecord:
+    return JobRecord(
+        id=row[0],
+        service=row[1],
+        environment=row[2],
+        action=row[3],
+        status=row[4],
+        ref=row[5],
+        version=row[6],
+        dry_run=bool(row[7]),
+        deployment_id=row[8],
+        created_at=row[9],
+        started_at=row[10],
+        finished_at=row[11],
+        log=row[12],
+        error=row[13],
     )

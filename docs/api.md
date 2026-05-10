@@ -32,6 +32,8 @@ GET    /api/services/{name}/env/{environment}
 POST   /api/services/{name}/env/{environment}
 DELETE /api/services/{name}/env/{environment}/{key}
 GET    /api/services/{name}/history
+GET    /api/jobs
+GET    /api/jobs/{job_id}
 POST   /api/services/{name}/deploy
 POST   /api/services/{name}/stop
 POST   /api/services/{name}/down
@@ -65,6 +67,10 @@ Local source:
 
 ## Runtime Actions
 
+Runtime-changing actions are asynchronous from the API contract point of view. The API creates a job, starts the
+operation in the background, and returns HTTP `202` with the current job payload. The UI should poll
+`GET /api/jobs/{job_id}` until `status` becomes `success` or `failed`.
+
 Deploy:
 
 ```json
@@ -92,3 +98,31 @@ Semantics:
 - `restart` runs `docker compose restart`.
 - `status` runs `docker compose ps`.
 - `logs` runs `docker compose logs --tail <n>`.
+
+Job payload:
+
+```json
+{
+  "id": 1,
+  "service": "myapp",
+  "environment": "prod",
+  "action": "deploy",
+  "status": "success",
+  "ref": "main",
+  "version": null,
+  "dry_run": false,
+  "deployment_id": 42,
+  "created_at": "2026-05-10T10:00:00+00:00",
+  "started_at": "2026-05-10T10:00:01+00:00",
+  "finished_at": "2026-05-10T10:00:30+00:00",
+  "log": "Generated override: ...",
+  "error": null
+}
+```
+
+Job statuses:
+
+- `queued`: operation was accepted but has not started.
+- `running`: operation is executing.
+- `success`: operation finished successfully.
+- `failed`: operation finished with an error or failed deployment status.

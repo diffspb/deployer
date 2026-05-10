@@ -65,6 +65,7 @@
 
 - [x] Add minimal FastAPI API around the engine.
 - [x] Document API contract in `docs/api.md`.
+- [x] Add API job model for deploy/stop/down/restart polling.
 - [ ] Add project list screen.
 - [ ] Add deployment history screen.
 - [ ] Add deploy action and log viewer.
@@ -78,3 +79,4 @@
 - [ ] Source compose files are not modified.
 - [ ] Docker commands are not user-editable free text.
 - [ ] Tests cover failure paths, not only happy paths.
+- [ ] API runtime operations do not block UI requests.

@@ -63,3 +63,28 @@ def test_state_updates_environment_vars_and_version(tmp_path: Path):
     assert env.current_ref == "main"
     assert env.current_commit == "abc123"
     assert env.last_deployment_id == deployment_id
+
+
+def test_state_tracks_runtime_jobs(tmp_path: Path):
+    state = StateStore(tmp_path / "state.db")
+
+    job_id = state.create_job("myapp", "prod", "deploy", ref="main", dry_run=True)
+    job = state.get_job(job_id)
+
+    assert job is not None
+    assert job.status == "queued"
+    assert job.ref == "main"
+    assert job.dry_run is True
+
+    state.start_job(job_id)
+    deployment_id = state.create_deployment("myapp", "prod", "deploy", "main")
+    state.finish_deployment(deployment_id, "success", "deploy ok")
+    state.finish_job(job_id, "success", "job ok", deployment_id=deployment_id)
+
+    finished = state.get_job(job_id)
+    assert finished is not None
+    assert finished.status == "success"
+    assert finished.deployment_id == deployment_id
+    assert finished.started_at is not None
+    assert finished.finished_at is not None
+    assert state.list_jobs(service="myapp")[0].id == job_id

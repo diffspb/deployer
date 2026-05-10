@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -11,7 +11,7 @@ from deployer.catalog import CatalogError, ServiceCatalog
 from deployer.config import DeployerConfig, load_config
 from deployer.engine import DeploymentEngine
 from deployer.errors import DeployerError
-from deployer.state import DeploymentRecord, EnvironmentRecord, ServiceRecord, StateStore
+from deployer.state import DeploymentRecord, EnvironmentRecord, JobRecord, ServiceRecord, StateStore
 
 
 class AddServiceRequest(BaseModel):
@@ -116,35 +116,46 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
     ) -> dict:
         return _history_payload(catalog.history(name, environment=environment, limit=limit))
 
-    @app.post("/api/services/{name}/deploy")
-    def deploy(name: str, payload: DeployRequest, context: ContextDep) -> dict:
-        result = context.catalog.deploy(
+    @app.get("/api/jobs")
+    def list_jobs(
+        context: ContextDep,
+        service: str | None = None,
+        environment: str | None = Query(default=None, pattern="^(prod|dev)$"),
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> dict:
+        return {"jobs": [_job_payload(job) for job in context.state.list_jobs(service, environment, limit)]}
+
+    @app.get("/api/jobs/{job_id}")
+    def get_job(job_id: int, context: ContextDep) -> dict:
+        job = context.state.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}")
+        return _job_payload(job)
+
+    @app.post("/api/services/{name}/deploy", status_code=202)
+    def deploy(name: str, payload: DeployRequest, background_tasks: BackgroundTasks, context: ContextDep) -> dict:
+        return _schedule_runtime_job(
+            context,
+            background_tasks,
             name,
-            context.engine,
-            environment=payload.environment,
+            "deploy",
+            payload.environment,
+            dry_run=payload.dry_run,
             ref=payload.ref,
             version=payload.version,
-            dry_run=payload.dry_run,
-        )
-        return _deploy_result_payload(result)
-
-    @app.post("/api/services/{name}/stop")
-    def stop(name: str, payload: RuntimeRequest, context: ContextDep) -> dict:
-        return _deploy_result_payload(
-            context.catalog.stop(name, context.engine, environment=payload.environment, dry_run=payload.dry_run)
         )
 
-    @app.post("/api/services/{name}/down")
-    def down(name: str, payload: RuntimeRequest, context: ContextDep) -> dict:
-        return _deploy_result_payload(
-            context.catalog.down(name, context.engine, environment=payload.environment, dry_run=payload.dry_run)
-        )
+    @app.post("/api/services/{name}/stop", status_code=202)
+    def stop(name: str, payload: RuntimeRequest, background_tasks: BackgroundTasks, context: ContextDep) -> dict:
+        return _schedule_runtime_job(context, background_tasks, name, "stop", payload.environment, payload.dry_run)
 
-    @app.post("/api/services/{name}/restart")
-    def restart(name: str, payload: RuntimeRequest, context: ContextDep) -> dict:
-        return _deploy_result_payload(
-            context.catalog.restart(name, context.engine, environment=payload.environment, dry_run=payload.dry_run)
-        )
+    @app.post("/api/services/{name}/down", status_code=202)
+    def down(name: str, payload: RuntimeRequest, background_tasks: BackgroundTasks, context: ContextDep) -> dict:
+        return _schedule_runtime_job(context, background_tasks, name, "down", payload.environment, payload.dry_run)
+
+    @app.post("/api/services/{name}/restart", status_code=202)
+    def restart(name: str, payload: RuntimeRequest, background_tasks: BackgroundTasks, context: ContextDep) -> dict:
+        return _schedule_runtime_job(context, background_tasks, name, "restart", payload.environment, payload.dry_run)
 
     @app.get("/api/services/{name}/status")
     def status(name: str, context: ContextDep, environment: str = Query(default="prod", pattern="^(prod|dev)$")) -> dict:
@@ -166,6 +177,7 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
 
 class ApiContext:
     def __init__(self, config: DeployerConfig):
+        self.config = config
         self.state = StateStore(config.state_db)
         self.catalog = ServiceCatalog(self.state, runtime_dir=config.runtime_dir)
         self.engine = DeploymentEngine(self.state)
@@ -245,9 +257,8 @@ def _history_payload(history) -> dict:
     }
 
 
-def _deploy_result_payload(result) -> dict:
+def _command_result_payload(result) -> dict:
     return {
-        "deployment_id": result.deployment_id,
         "project": result.project,
         "environment": result.environment,
         "status": result.status,
@@ -256,13 +267,91 @@ def _deploy_result_payload(result) -> dict:
     }
 
 
-def _command_result_payload(result) -> dict:
+def _schedule_runtime_job(
+    context: ApiContext,
+    background_tasks: BackgroundTasks,
+    service: str,
+    action: str,
+    environment: str,
+    dry_run: bool,
+    ref: str | None = None,
+    version: str | None = None,
+) -> dict:
+    context.catalog.get_service(service)
+    context.catalog.get_environment(service, environment)
+    job_id = context.state.create_job(
+        service,
+        environment,
+        action,
+        ref=ref,
+        version=version,
+        dry_run=dry_run,
+    )
+    background_tasks.add_task(_run_runtime_job, context.config, job_id)
+    job = context.state.get_job(job_id)
+    return _job_payload(job)
+
+
+def _run_runtime_job(config: DeployerConfig, job_id: int) -> None:
+    context = ApiContext(config)
+    job = context.state.get_job(job_id)
+    if job is None:
+        return
+
+    context.state.start_job(job_id)
+    try:
+        if job.action == "deploy":
+            result = context.catalog.deploy(
+                job.service,
+                context.engine,
+                environment=job.environment,
+                ref=job.ref,
+                version=job.version,
+                dry_run=job.dry_run,
+            )
+        elif job.action == "stop":
+            result = context.catalog.stop(job.service, context.engine, environment=job.environment, dry_run=job.dry_run)
+        elif job.action == "down":
+            result = context.catalog.down(job.service, context.engine, environment=job.environment, dry_run=job.dry_run)
+        elif job.action == "restart":
+            result = context.catalog.restart(
+                job.service,
+                context.engine,
+                environment=job.environment,
+                dry_run=job.dry_run,
+            )
+        else:
+            raise RuntimeError(f"Unknown runtime action: {job.action}")
+
+        context.state.finish_job(
+            job_id,
+            result.status,
+            result.log,
+            deployment_id=result.deployment_id,
+            error=None if result.status == "success" else result.log,
+        )
+    except Exception as exc:
+        context.state.finish_job(job_id, "failed", str(exc), error=str(exc))
+
+
+def _job_payload(job: JobRecord | None) -> dict:
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job")
     return {
-        "project": result.project,
-        "environment": result.environment,
-        "status": result.status,
-        "log": result.log,
-        "override_path": str(result.override_path),
+        "id": job.id,
+        "service": job.service,
+        "environment": job.environment,
+        "action": job.action,
+        "status": job.status,
+        "ref": job.ref,
+        "version": job.version,
+        "dry_run": job.dry_run,
+        "deployment_id": job.deployment_id,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "log": job.log,
+        "error": job.error,
     }
 
 

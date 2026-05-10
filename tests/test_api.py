@@ -62,9 +62,15 @@ def test_api_service_local_env_deploy_history_and_delete(tmp_path: Path):
         "/api/services/myapp/deploy",
         json={"environment": "prod", "ref": "main", "dry_run": True},
     )
-    assert response.status_code == 200
-    assert response.json()["status"] == "success"
-    assert "Dry run" in response.json()["log"]
+    assert response.status_code == 202
+    job_id = response.json()["id"]
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "success"
+    assert job["deployment_id"] is not None
+    assert "Dry run" in job["log"]
+
+    jobs = client.get("/api/jobs?service=myapp&environment=prod").json()
+    assert jobs["jobs"][0]["id"] == job_id
 
     history = client.get("/api/services/myapp/history?environment=prod").json()
     assert history["environments"][0]["current_ref"] == "main"
