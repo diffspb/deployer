@@ -12,6 +12,7 @@ def build_override(
     manifest: Manifest,
     platform: Platform = DEFAULT_PLATFORM,
     environment: str = "prod",
+    env_file: str | None = None,
 ) -> dict:
     labels: list[str] = ["traefik.enable=true"]
 
@@ -22,8 +23,9 @@ def build_override(
         "labels": labels,
         "networks": [platform.network],
     }
-    if manifest.env_file:
-        service_config["env_file"] = manifest.env_file
+    effective_env_file = env_file or manifest.env_file
+    if effective_env_file:
+        service_config["env_file"] = effective_env_file
 
     return {
         "services": {
@@ -41,8 +43,9 @@ def render_override(
     manifest: Manifest,
     platform: Platform = DEFAULT_PLATFORM,
     environment: str = "prod",
+    env_file: str | None = None,
 ) -> str:
-    return yaml.safe_dump(build_override(manifest, platform, environment), sort_keys=False)
+    return yaml.safe_dump(build_override(manifest, platform, environment, env_file), sort_keys=False)
 
 
 def write_override(
@@ -50,11 +53,13 @@ def write_override(
     manifest: Manifest,
     platform: Platform = DEFAULT_PLATFORM,
     environment: str = "prod",
+    output_dir: Path | None = None,
+    env_file: str | None = None,
 ) -> Path:
-    deployer_dir = project_dir / ".deployer"
-    deployer_dir.mkdir(exist_ok=True)
+    deployer_dir = output_dir or project_dir / ".deployer"
+    deployer_dir.mkdir(parents=True, exist_ok=True)
     path = deployer_dir / f"{environment}.override.yml"
-    path.write_text(render_override(manifest, platform, environment))
+    path.write_text(render_override(manifest, platform, environment, env_file))
     return path
 
 

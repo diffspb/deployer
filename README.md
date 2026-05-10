@@ -29,7 +29,7 @@ make render-cpucol
 
 ## MVP Scope
 
-Current implementation focuses on the first deployer engine:
+Current implementation includes the deployer engine and the first service catalog:
 
 - `deployer.yml` manifest validation.
 - Traefik override generation.
@@ -40,6 +40,20 @@ Current implementation focuses on the first deployer engine:
 - CLI suitable for later reuse by FastAPI UI.
 - Environment-aware prod/dev deployment.
 - Stop and status commands.
+- Service catalog with `git` and `local` sources.
+- Managed runtime layout under `/var/lib/deployer/services/<name>/`.
+- Environment variable storage and generated env files.
+
+Catalog workflow:
+
+```bash
+deployer services add myapp --git-url <url> --state-db /var/lib/deployer/state.db
+deployer services add-local myapp --path /path/to/project --state-db /var/lib/deployer/state.db
+deployer env set myapp prod KEY=value --state-db /var/lib/deployer/state.db
+deployer deploy myapp --environment prod --ref main --state-db /var/lib/deployer/state.db
+deployer status myapp --environment prod --state-db /var/lib/deployer/state.db
+deployer stop myapp --environment prod --state-db /var/lib/deployer/state.db
+```
 
 See:
 

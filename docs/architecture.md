@@ -6,6 +6,9 @@ The deployer is split into a reusable engine and thin interfaces.
 CLI / future FastAPI UI
         |
         v
+ServiceCatalog
+        |
+        v
 DeploymentEngine
         |
         +-- Manifest loader and validator
@@ -24,8 +27,30 @@ DeploymentEngine
 - One project can have only one active deployment.
 - Different projects may deploy concurrently later.
 - The same engine must be reusable from CLI and FastAPI.
+- The catalog owns service/source/environment state.
+- The engine remains path-capable and does not know how sources are fetched.
 
 ## Current CLI
+
+Service catalog mode:
+
+```bash
+deployer services add myapp --git-url <url>
+deployer services add-local myapp --path /path/to/project
+deployer services list
+deployer services show myapp
+deployer services remove myapp
+deployer refs myapp
+deployer env list myapp prod
+deployer env set myapp prod KEY=value
+deployer env unset myapp prod KEY
+deployer env render myapp prod
+deployer deploy myapp --environment prod --ref main --state-db /var/lib/deployer/state.db
+deployer stop myapp --environment prod --state-db /var/lib/deployer/state.db
+deployer status myapp --environment prod --state-db /var/lib/deployer/state.db
+```
+
+Path mode remains available for development and direct debugging:
 
 ```bash
 deployer validate /path/to/project
@@ -37,6 +62,18 @@ deployer history --state-db /var/lib/deployer/state.db tasktrack
 ```
 
 ## Deployment Flow
+
+Catalog mode:
+
+1. Resolve service by name from SQLite.
+2. Resolve environment config and render `/var/lib/deployer/services/<name>/env/<environment>.env`.
+3. For git sources, fetch tags/branches and checkout requested ref.
+4. Load `deployer.yml` from the managed repo or local source path.
+5. Render `/var/lib/deployer/services/<name>/overrides/<environment>.override.yml`.
+6. Run the same engine flow as path mode.
+7. Store current version/ref/commit on successful deployment.
+
+Path mode:
 
 1. Load `deployer.yml`.
 2. Validate required compose files.
@@ -54,7 +91,7 @@ deployer history --state-db /var/lib/deployer/state.db tasktrack
 
 ## Future FastAPI UI
 
-The UI should not call Docker directly. It should call the same engine service layer used by CLI.
+The UI should not call Docker directly. It should call the catalog/service layer, which then calls the engine.
 
 The target workflow is service-based, not path-based. See `docs/service-catalog-plan.md`.
 

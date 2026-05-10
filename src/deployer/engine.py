@@ -53,6 +53,8 @@ class DeploymentEngine:
         dry_run: bool = False,
         manifest_path: Path | None = None,
         environment: str = "prod",
+        override_dir: Path | None = None,
+        env_file: str | None = None,
     ) -> DeployResult:
         project_dir = project_dir.resolve()
         manifest = load_manifest(project_dir, manifest_path=manifest_path)
@@ -63,12 +65,18 @@ class DeploymentEngine:
             version,
         )
         log_parts: list[str] = []
-        override_path = project_dir / ".deployer" / f"{environment}.override.yml"
+        override_path = (override_dir or project_dir / ".deployer") / f"{environment}.override.yml"
 
         lock = _project_lock(manifest.project_name)
         with lock:
             try:
-                override_path = write_override(project_dir, manifest, environment=environment)
+                override_path = write_override(
+                    project_dir,
+                    manifest,
+                    environment=environment,
+                    output_dir=override_dir,
+                    env_file=env_file,
+                )
                 log_parts.append(f"Generated override: {override_path}")
                 command = compose_command(manifest, override_path, environment=environment)
                 log_parts.append(f"Command: {' '.join(command)}")
@@ -101,6 +109,8 @@ class DeploymentEngine:
         dry_run: bool = False,
         manifest_path: Path | None = None,
         environment: str = "prod",
+        override_dir: Path | None = None,
+        env_file: str | None = None,
     ) -> DeployResult:
         project_dir = project_dir.resolve()
         manifest = load_manifest(project_dir, manifest_path=manifest_path)
@@ -111,12 +121,18 @@ class DeploymentEngine:
             None,
         )
         log_parts: list[str] = []
-        override_path = project_dir / ".deployer" / f"{environment}.override.yml"
+        override_path = (override_dir or project_dir / ".deployer") / f"{environment}.override.yml"
 
         lock = _project_lock(manifest.project_name)
         with lock:
             try:
-                override_path = write_override(project_dir, manifest, environment=environment)
+                override_path = write_override(
+                    project_dir,
+                    manifest,
+                    environment=environment,
+                    output_dir=override_dir,
+                    env_file=env_file,
+                )
                 log_parts.append(f"Generated override: {override_path}")
                 command = compose_command(manifest, override_path, environment=environment, action="down")
                 log_parts.append(f"Command: {' '.join(command)}")
@@ -139,10 +155,18 @@ class DeploymentEngine:
         project_dir: Path,
         manifest_path: Path | None = None,
         environment: str = "prod",
+        override_dir: Path | None = None,
+        env_file: str | None = None,
     ) -> CommandResult:
         project_dir = project_dir.resolve()
         manifest = load_manifest(project_dir, manifest_path=manifest_path)
-        override_path = write_override(project_dir, manifest, environment=environment)
+        override_path = write_override(
+            project_dir,
+            manifest,
+            environment=environment,
+            output_dir=override_dir,
+            env_file=env_file,
+        )
         command = compose_command(manifest, override_path, environment=environment, action="ps")
         try:
             result = self.runner.run(command, cwd=project_dir)

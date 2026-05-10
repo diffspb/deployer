@@ -37,12 +37,12 @@ Results:
 
 - No real Docker Compose deployment test yet.
 - No rollback implementation yet.
-- No git source checkout/pull yet.
 - No encrypted secrets yet.
 - No Docker socket proxy integration yet.
 - No FastAPI API or UI yet.
 - Healthcheck currently checks the first route only.
 - Status command currently shells out to `docker compose ps`; no normalized status model yet.
+- Git source support is covered with a fake runner; a real local bare-repository integration test is still needed.
 
 ## Architecture Review
 
@@ -61,3 +61,34 @@ Risks to address next:
 - Real deployment should stream logs incrementally instead of collecting command output only after process exit.
 - Project manifests need to be added to real repositories or managed centrally; both modes should stay supported.
 - The existing infra still mounts `docker.sock` directly in several services. The deployer service must start with socket-proxy rather than copying this pattern.
+
+## Service Catalog v1 Review
+
+Date: 2026-05-10
+
+Commands run:
+
+```bash
+.venv/bin/python -m pytest --cov=deployer --cov-report=term-missing
+```
+
+Results:
+
+- 33 tests passed.
+- Coverage: 85.77%.
+- Coverage threshold: 80%.
+
+Implemented architecture changes:
+
+- `ServiceCatalog` owns service/source/environment state.
+- `DeploymentEngine` remains reusable and path-based internally.
+- Catalog mode renders env files and override files under `/var/lib/deployer/services/<name>/`.
+- Path mode still renders generated files under project-local `.deployer/`.
+- Git operations are isolated behind `CommandRunner`, so CLI/UI layers do not construct shell commands directly.
+
+Remaining risks:
+
+- Duplicate service errors are still low-level SQLite errors wrapped as catalog errors.
+- Git source support needs an integration test against a real local bare repository.
+- Service history is still keyed by project name and does not yet show enriched catalog metadata by default.
+- `restart` and `logs` commands are still missing.

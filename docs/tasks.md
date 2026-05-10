@@ -35,18 +35,21 @@
 
 ## Service Catalog v1
 
-- [ ] Document target service/source/environment model in `docs/service-catalog-plan.md`
-- [ ] Add `services` table
-- [ ] Add `environments` table
-- [ ] Add managed runtime layout under `/var/lib/deployer/services/<name>/`
-- [ ] Add git source support: clone, fetch, refs, checkout
-- [ ] Add local source support as debug/admin mode
-- [ ] Add environment variable storage
-- [ ] Render env files to managed workspace
-- [ ] Change primary CLI workflow to service names
+- [x] Document target service/source/environment model in `docs/service-catalog-plan.md`
+- [x] Add `services` table
+- [x] Add `environments` table
+- [x] Add managed runtime layout under `/var/lib/deployer/services/<name>/`
+- [x] Add git source support: clone, fetch, refs, checkout
+- [x] Add local source support as debug/admin mode
+- [x] Add environment variable storage
+- [x] Render env files to managed workspace
+- [x] Change primary CLI workflow to service names for deploy/stop/status
 - [ ] Keep path-based commands for development/debug use
 - [ ] Add `restart` command
 - [ ] Add `logs` command
+- [ ] Add service-based history output enriched with current ref/commit
+- [ ] Add conflict-safe duplicate service handling with clearer errors
+- [ ] Add integration tests for git source using a real local bare repository
 
 ## Phase 2: Runtime Hardening
 
@@ -68,7 +71,7 @@
 
 - [ ] UI does not duplicate deployment logic.
 - [ ] Engine does not depend on FastAPI.
-- [ ] Generated files are isolated under `.deployer/`.
+- [ ] Generated files are isolated under `.deployer/` for path mode and `/var/lib/deployer/services/<name>/` for catalog mode.
 - [ ] Source compose files are not modified.
 - [ ] Docker commands are not user-editable free text.
 - [ ] Tests cover failure paths, not only happy paths.
