@@ -28,6 +28,7 @@ class ServiceRuntime:
     env_file: Path
     ref: str | None
     commit_hash: str | None
+    prepare_log: str
 
 
 @dataclass(frozen=True)
@@ -200,6 +201,15 @@ class ServiceCatalog:
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
         )
+        merged_log = _merge_logs(runtime.prepare_log, result.log)
+        result = DeployResult(
+            result.deployment_id,
+            result.project,
+            result.environment,
+            result.status,
+            merged_log,
+            result.override_path,
+        )
         if result.status == "success":
             self.state.update_environment_version(
                 service_name,
@@ -293,14 +303,21 @@ class ServiceCatalog:
         runtime = self.resolve_runtime(service_name, environment)
         commit_hash = None
         actual_ref = ref or runtime.service.default_branch
+        prepare_log: list[str] = []
         if runtime.service.source_type == "git":
             repo_dir = runtime.project_dir
+            prepare_log.append("git fetch --all --tags")
             self.runner.run(["git", "fetch", "--all", "--tags"], cwd=repo_dir)
             if actual_ref:
-                self.runner.run(["git", "checkout", actual_ref], cwd=repo_dir)
+                prepare_log.append(f"git checkout {actual_ref}")
+                self._checkout_ref(repo_dir, actual_ref)
             commit_hash = self.runner.run(["git", "rev-parse", "HEAD"], cwd=repo_dir).output.strip()
+            current_ref = self.runner.run(["git", "branch", "--show-current"], cwd=repo_dir).output.strip()
+            prepare_log.append(f"git branch --show-current -> {current_ref or '(detached)'}")
+            prepare_log.append(f"git rev-parse HEAD -> {commit_hash}")
         elif _is_git_repo(runtime.project_dir):
             commit_hash = self.runner.run(["git", "rev-parse", "HEAD"], cwd=runtime.project_dir).output.strip()
+            prepare_log.append(f"git rev-parse HEAD -> {commit_hash}")
         self.render_env_file(service_name, environment)
         return ServiceRuntime(
             runtime.service,
@@ -310,6 +327,7 @@ class ServiceCatalog:
             runtime.env_file,
             actual_ref,
             commit_hash,
+            "\n".join(prepare_log),
         )
 
     def resolve_runtime(self, service_name: str, environment: str) -> ServiceRuntime:
@@ -325,6 +343,7 @@ class ServiceCatalog:
             env_file=service_dir / "env" / f"{environment}.env",
             ref=None,
             commit_hash=None,
+            prepare_log="",
         )
 
     def service_dir(self, name: str) -> Path:
@@ -334,9 +353,26 @@ class ServiceCatalog:
         if self.state.get_service(name) is not None:
             raise CatalogError(f"Service already exists: {name}")
 
+    def _checkout_ref(self, repo_dir: Path, ref: str) -> None:
+        try:
+            self.runner.run(["git", "checkout", ref], cwd=repo_dir)
+            return
+        except CommandError as exc:
+            remote_ref = f"origin/{ref}"
+            try:
+                self.runner.run(["git", "show-ref", "--verify", f"refs/remotes/{remote_ref}"], cwd=repo_dir)
+                self.runner.run(["git", "checkout", "-B", ref, "--track", remote_ref], cwd=repo_dir)
+                return
+            except CommandError:
+                raise exc
+
 
 def render_env(env_vars: dict[str, str]) -> str:
     return "".join(f"{key}={_env_value(value)}\n" for key, value in sorted(env_vars.items()))
+
+
+def _merge_logs(*parts: str) -> str:
+    return "\n".join(part for part in parts if part)
 
 
 def _env_value(value: str) -> str:

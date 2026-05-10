@@ -137,3 +137,12 @@ def test_api_parses_status_summary_payload():
     assert summary["healthy"] is True
     assert summary["health"] == "healthy"
     assert summary["containers"][0]["state"] == "running"
+
+
+def test_api_parses_status_summary_payload_from_json_lines():
+    summary = _status_summary_payload(
+        '{"Name":"myapp","Service":"app","State":"running","Health":"healthy"}\n'
+    )
+
+    assert summary["running"] is True
+    assert summary["health"] == "healthy"

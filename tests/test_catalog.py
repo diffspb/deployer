@@ -148,6 +148,9 @@ def test_catalog_git_source_uses_runner_for_clone_refs_and_checkout(tmp_path: Pa
     assert status.current_ref == "main"
     assert status.current_commit == "abc123"
     assert result.status == "success"
+    assert "git fetch --all --tags" in result.log
+    assert "git checkout main" in result.log
+    assert "git rev-parse HEAD -> abc123" in result.log
     assert state.require_environment("myapp", "prod").current_commit == "abc123"
     assert ("git", "fetch", "--all", "--tags") in runner.commands
 

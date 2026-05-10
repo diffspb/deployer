@@ -313,19 +313,11 @@ def _status_summary_payload(raw: str) -> dict:
     try:
         items = json.loads(raw or "[]")
     except json.JSONDecodeError:
-        return {
-            "containers": [],
-            "running": False,
-            "healthy": False,
-            "health": "unknown",
-        }
+        items = _parse_json_lines(raw)
+    if isinstance(items, dict):
+        items = [items]
     if not isinstance(items, list):
-        return {
-            "containers": [],
-            "running": False,
-            "healthy": False,
-            "health": "unknown",
-        }
+        return _empty_status_summary()
 
     containers = []
     any_running = False
@@ -362,6 +354,30 @@ def _status_summary_payload(raw: str) -> dict:
         "running": any_running,
         "healthy": overall_health == "healthy",
         "health": overall_health,
+    }
+
+
+def _parse_json_lines(raw: str) -> list[dict]:
+    items = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            items.append(value)
+    return items
+
+
+def _empty_status_summary() -> dict:
+    return {
+        "containers": [],
+        "running": False,
+        "healthy": False,
+        "health": "unknown",
     }
 
 
