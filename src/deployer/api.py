@@ -14,6 +14,8 @@ from deployer.catalog import CatalogError, ServiceCatalog
 from deployer.config import DeployerConfig, load_config
 from deployer.engine import DeploymentEngine
 from deployer.errors import DeployerError
+from deployer.manifest import Manifest, load_manifest
+from deployer.override import route_host
 from deployer.state import DeploymentRecord, EnvironmentRecord, JobRecord, ServiceRecord, StateStore
 
 
@@ -218,10 +220,11 @@ def _service_payload(service: ServiceRecord) -> dict:
     }
 
 
-def _environment_payload(env: EnvironmentRecord) -> dict:
+def _environment_payload(env: EnvironmentRecord, public_url: str | None = None) -> dict:
     return {
         "name": env.name,
         "subdomain": env.subdomain,
+        "public_url": public_url,
         "env": env.env_vars,
         "current_version": env.current_version,
         "current_ref": env.current_ref,
@@ -232,12 +235,19 @@ def _environment_payload(env: EnvironmentRecord) -> dict:
 
 def _service_detail(catalog: ServiceCatalog, name: str) -> dict:
     service = catalog.get_service(name)
+    manifest = _load_service_manifest(service)
     return {
         **_service_payload(service),
         "source_status": _source_status_payload(catalog.source_status(service.name)),
         "environments": [
-            _environment_payload(catalog.get_environment(service.name, "prod")),
-            _environment_payload(catalog.get_environment(service.name, "dev")),
+            _environment_payload(
+                catalog.get_environment(service.name, "prod"),
+                public_url=_public_url_for(manifest, "prod"),
+            ),
+            _environment_payload(
+                catalog.get_environment(service.name, "dev"),
+                public_url=_public_url_for(manifest, "dev"),
+            ),
         ],
     }
 
@@ -379,6 +389,20 @@ def _empty_status_summary() -> dict:
         "healthy": False,
         "health": "unknown",
     }
+
+
+def _load_service_manifest(service: ServiceRecord) -> Manifest | None:
+    try:
+        return load_manifest(Path(service.source_path))
+    except DeployerError:
+        return None
+
+
+def _public_url_for(manifest: Manifest | None, environment: str) -> str | None:
+    if manifest is None or not manifest.routes:
+        return None
+    route = manifest.routes[0]
+    return f"https://{route_host(route, environment=environment)}/"
 
 
 def _schedule_runtime_job(

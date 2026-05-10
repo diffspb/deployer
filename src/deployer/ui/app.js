@@ -123,10 +123,7 @@ function runtimeByName(serviceName, environment) {
 
 function runtimeUrl(serviceName, environment) {
   const runtime = runtimeByName(serviceName, environment);
-  const subdomain = runtime?.environment.subdomain || serviceName;
-  return environment === "prod"
-    ? `https://${subdomain}.busypage.ru/`
-    : `https://${subdomain}.dev.busypage.ru/`;
+  return runtime?.environment.public_url || null;
 }
 
 function latestRuntimeJob(serviceName, environment) {
@@ -446,6 +443,7 @@ function renderServiceTableRow(service, environment) {
   const summary = runtimeStatus(service.name, environment);
   const activeJob = activeJobForRuntime(service.name, environment);
   const canOpenLink = summary.running;
+  const publicUrl = runtimeUrl(service.name, environment);
   const menuOpen =
     state.actionMenu &&
     state.actionMenu.service === service.name &&
@@ -462,7 +460,7 @@ function renderServiceTableRow(service, environment) {
       <div><span class="badge">${escapeHtml(environment)}</span></div>
       <div>
         ${canOpenLink
-          ? `<a class="table-link mono" href="${escapeHtml(runtimeUrl(service.name, environment))}" target="_blank" rel="noreferrer">${escapeHtml(runtimeUrl(service.name, environment))}</a>`
+          ? `<a class="table-link mono" href="${escapeHtml(publicUrl)}" target="_blank" rel="noreferrer">${escapeHtml(publicUrl)}</a>`
           : `<span class="subtle">not exposed</span>`}
       </div>
       <div>
@@ -532,7 +530,7 @@ function renderServicePage() {
                 <span class="badge">${escapeHtml(environment)}</span>
                 ${renderRuntimeStatus(service.name, environment)}
               </div>
-              <div class="muted mono">${escapeHtml(runtimeUrl(service.name, environment))}</div>
+              <div class="muted mono">${escapeHtml(runtimeUrl(service.name, environment) || "-")}</div>
               <div class="mono top-gap">${escapeHtml(envSummary(service, environment).current_ref || "-")}</div>
             </button>
           `).join("")}
@@ -553,6 +551,7 @@ function renderRuntimePage() {
   const env = envSummary(service, environment);
   const envPairs = Object.entries(env.env || {});
   const summary = runtimeStatus(service.name, environment);
+  const publicUrl = runtimeUrl(service.name, environment);
   const jobs = state.jobs.filter((job) => job.service === service.name && job.environment === environment);
   return `
     <div class="page-stack">
@@ -569,7 +568,7 @@ function renderRuntimePage() {
         <div class="runtime-page-grid">
           <div class="fact">
             <span class="fact-label">Public URL</span>
-            <span class="fact-value">${summary.running ? `<a class="table-link mono" href="${escapeHtml(runtimeUrl(service.name, environment))}" target="_blank" rel="noreferrer">${escapeHtml(runtimeUrl(service.name, environment))}</a>` : `<span class="subtle">not exposed</span>`}</span>
+            <span class="fact-value">${summary.running && publicUrl ? `<a class="table-link mono" href="${escapeHtml(publicUrl)}" target="_blank" rel="noreferrer">${escapeHtml(publicUrl)}</a>` : `<span class="subtle">not exposed</span>`}</span>
           </div>
           <div class="fact">
             <span class="fact-label">Current ref</span>

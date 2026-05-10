@@ -61,6 +61,8 @@ def test_api_service_local_env_deploy_history_and_delete(tmp_path: Path):
     assert detail["source_type"] == "local"
     assert detail["source_status"]["available"] is True
     assert detail["source_status"]["path_exists"] is True
+    assert detail["environments"][0]["public_url"] == "https://myapp.busypage.ru/"
+    assert detail["environments"][1]["public_url"] == "https://myapp.dev.busypage.ru/"
 
     response = client.post("/api/services/myapp/env/prod", json={"key": "TOKEN", "value": "abc"})
     assert response.status_code == 200
