@@ -189,17 +189,125 @@ GET  /api/services/{name}/logs
 
 ## UI Target
 
-First useful UI:
+The UI must make the split between service definition and runtime targets explicit.
 
-- dashboard with all services;
-- prod/dev status per service;
-- current ref/commit;
-- Deploy, Stop, Restart actions;
-- Add service flow;
-- env editor;
+Mental model:
+
+```text
+Service
+  Source
+  Shared settings
+  Runtime target: prod
+  Runtime target: dev
+```
+
+`prod` and `dev` are separate runtime targets. They can be checked out from different refs, have different env vars, different URLs, different runtime status, different logs, and different deployment history. The UI must not expose mixed service-level runtime actions such as "Deploy prod", "Deploy dev", and one shared "Stop" button in the same action group.
+
+Service-level data:
+
+- service name;
+- source type;
+- git URL or local path;
+- default branch;
+- source checkout status;
+- current local checkout ref and commit;
+- shared manifest/compose definition.
+
+Runtime-target data:
+
+- environment name: `prod` or `dev`;
+- domain/subdomain;
+- env vars;
+- current deployed ref/version/commit;
+- last deployment id and status;
+- runtime status;
+- runtime logs;
 - deployment history;
-- generated override preview;
-- links to application URL and Dozzle.
+- runtime actions.
+
+### Near-Term UI Goal
+
+Main page should be a service table or compact service list, not a card grid optimized for aesthetics. Each row should show source status and two explicit runtime blocks:
+
+```text
+Service      Source                  Production                 Development
+test-app     fetched master 56028ed   ref master running         ref develop stopped
+                                     Deploy Restart Stop Logs   Deploy Restart Stop Logs
+```
+
+Alternative row shape:
+
+```text
+test-app
+source: fetched · master · 56028ed
+
+[ PROD ]
+url: https://test-app.busypage.ru
+ref: master
+commit: 56028ed
+status: running
+Deploy | Restart | Stop | Down | Logs | Env | History
+
+[ DEV ]
+url: https://test-app.dev.busypage.ru
+ref: develop
+commit: a81c3f2
+status: stopped
+Deploy | Restart | Stop | Down | Logs | Env | History
+```
+
+### Pages
+
+- `Services`: main operator page. Lists service definitions and their `prod`/`dev` runtime targets.
+- `Service Detail`: source and shared service settings plus runtime target summaries.
+- `Runtime Detail`: focused page for one target, for example `/services/test-app/prod` or `/services/test-app/dev`.
+- `Jobs`: global deployment/job audit log.
+- `System`: selected infrastructure services such as Traefik, oauth2-proxy, Keycloak, Dozzle, Netdata, and deployer.
+
+### Service Detail
+
+Service detail should not have shared runtime buttons. It should show source/shared information and two runtime cards:
+
+```text
+Service: test-app
+Source: github... fetched master 56028ed
+
+[ Production ]
+Domain: test-app.busypage.ru
+Current ref: master
+Current commit: 56028ed
+Env vars: 3
+Last deploy: success
+Actions: Deploy | Restart | Stop | Down | Logs | History | Env
+
+[ Development ]
+Domain: test-app.dev.busypage.ru
+Current ref: develop
+Current commit: ...
+Env vars: 5
+Last deploy: failed
+Actions: Deploy | Restart | Stop | Down | Logs | History | Env
+```
+
+### Modals And Drawers
+
+Use modals/drawers only when they preserve context:
+
+- `Deploy Runtime Modal`: always scoped to one runtime target, for example `Deploy test-app / prod`; environment is not selectable inside the modal.
+- `Edit Env Drawer`: scoped to one runtime target.
+- `Logs Drawer`: scoped to one runtime target.
+- `Job Details Drawer`: scoped to one job.
+- `Stop`/`Down` confirmation modal: must include service name and runtime target in the title.
+
+### Immediate Redesign Tasks
+
+1. Replace dashboard cards with a runtime-target-first service table/list.
+2. Introduce a `RuntimeCard(service, environment)` UI component.
+3. Remove service-level runtime action groups.
+4. Make deploy modal accept fixed `service + environment`; do not choose environment inside it.
+5. Open env editor directly for a fixed runtime target; remove the global env selector.
+6. Filter jobs, history, status, and logs by `service + environment` everywhere in the UI.
+7. Add global `Jobs` page after runtime actions are no longer mixed.
 
 ## Implementation Order
 
@@ -211,3 +319,4 @@ First useful UI:
 6. Keep path-based commands as development commands.
 7. Add API skeleton.
 8. Add minimal UI.
+9. Redesign UI around explicit runtime targets.
