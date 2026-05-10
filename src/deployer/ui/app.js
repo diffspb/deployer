@@ -1,20 +1,21 @@
 const state = {
   services: [],
   jobs: [],
-  currentView: "services",
+  currentView: { name: "services" },
   theme: localStorage.getItem("deployer-theme") || "light",
   toast: "",
   addOpen: false,
   addSourceType: "git",
   deployModal: null,
-  envDrawer: null,
   logsDrawer: null,
   historyDrawer: null,
-  serviceDrawer: null,
+  actionMenu: null,
+  expandedServices: {},
   jobsFilter: {
     service: "",
     environment: "",
   },
+  runtimeStatus: {},
 };
 
 const root = document.getElementById("deployer-root");
@@ -30,12 +31,13 @@ const icons = {
   close: "M18 6L6 18M6 6l12 12",
   moon: "M20 15.4A8.5 8.5 0 018.6 4 8.5 8.5 0 1020 15.4z",
   sun: "M12 3v2m0 14v2m9-9h-2M5 12H3m15.4-6.4L17 7M7 17l-1.4 1.4M18.4 18.4L17 17M7 7L5.6 5.6M12 8a4 4 0 100 8 4 4 0 000-8z",
-  git: "M7 7a2 2 0 104 0 2 2 0 00-4 0zm6 10a2 2 0 104 0 2 2 0 00-4 0zM9 9v2a4 4 0 004 4h2",
   gear: "M10.3 4.3c.4-1.7 2.9-1.7 3.4 0a1.7 1.7 0 002.5 1c1.5-.9 3.3.9 2.4 2.4a1.7 1.7 0 001 2.5c1.7.4 1.7 2.9 0 3.4a1.7 1.7 0 00-1 2.5c.9 1.5-.9 3.3-2.4 2.4a1.7 1.7 0 00-2.5 1c-.5 1.7-3 1.7-3.4 0a1.7 1.7 0 00-2.5-1c-1.5.9-3.3-.9-2.4-2.4a1.7 1.7 0 00-1-2.5c-1.7-.5-1.7-3 0-3.4a1.7 1.7 0 001-2.5c-.9-1.5.9-3.3 2.4-2.4a1.7 1.7 0 002.5-1zM12 9a3 3 0 100 6 3 3 0 000-6z",
-  search: "M11 19a8 8 0 100-16 8 8 0 000 16zm10 2l-4.35-4.35",
   list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
   history: "M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8m9-4v8l4 2",
-  file: "M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9zm0 0v6h6",
+  chevronDown: "M6 9l6 6 6-6",
+  chevronRight: "M9 6l6 6-6 6",
+  external: "M14 5h5v5M10 14L19 5M19 14v5H5V5h5",
+  more: "M12 5h.01M12 12h.01M12 19h.01",
 };
 
 function icon(name, size = 15) {
@@ -61,6 +63,10 @@ async function api(path, options = {}) {
     throw new Error(data?.detail || `HTTP ${response.status}`);
   }
   return data;
+}
+
+function runtimeKey(service, environment) {
+  return `${service}/${environment}`;
 }
 
 function serviceColor(name) {
@@ -96,12 +102,30 @@ function formatSource(service) {
   return service.source_url || service.source_path || "-";
 }
 
-function envSummary(service, name) {
-  return service.environments?.find((env) => env.name === name) || {};
+function environmentLabel(name) {
+  return name === "prod" ? "Production" : "Development";
+}
+
+function envSummary(service, environment) {
+  return service.environments?.find((item) => item.name === environment) || {};
 }
 
 function serviceByName(name) {
   return state.services.find((service) => service.name === name) || null;
+}
+
+function runtimeByName(serviceName, environment) {
+  const service = serviceByName(serviceName);
+  if (!service) return null;
+  return { service, environment: envSummary(service, environment) };
+}
+
+function runtimeUrl(serviceName, environment) {
+  const runtime = runtimeByName(serviceName, environment);
+  const subdomain = runtime?.environment.subdomain || serviceName;
+  return environment === "prod"
+    ? `https://${subdomain}.busypage.ru/`
+    : `https://${subdomain}.dev.busypage.ru/`;
 }
 
 function latestRuntimeJob(serviceName, environment) {
@@ -115,22 +139,6 @@ function activeJobForRuntime(serviceName, environment) {
       job.environment === environment &&
       ["queued", "running"].includes(job.status),
   );
-}
-
-function runtimeStatusBadge(service, environment) {
-  const activeJob = activeJobForRuntime(service.name, environment);
-  const latestJob = latestRuntimeJob(service.name, environment);
-  const env = envSummary(service, environment);
-  if (activeJob) {
-    return `<span class="badge running"><span class="dot"></span>${escapeHtml(activeJob.action)} ${escapeHtml(activeJob.status)}</span>`;
-  }
-  if (latestJob) {
-    return jobBadge(latestJob.status, latestJob.action);
-  }
-  if (env.current_ref || env.current_version) {
-    return `<span class="badge"><span class="dot"></span>configured</span>`;
-  }
-  return `<span class="badge"><span class="dot"></span>idle</span>`;
 }
 
 function sourceBadge(service) {
@@ -152,13 +160,73 @@ function jobBadge(status, action = "") {
   return `<span class="badge ${cls}"><span class="dot"></span>${escapeHtml(action ? `${action} ${status}` : status || "unknown")}</span>`;
 }
 
-function environmentLabel(name) {
-  return name === "prod" ? "Production" : "Development";
+function parseRuntimeStatus(serviceName, environment, response) {
+  const text = String(response?.log || "");
+  const lower = text.toLowerCase();
+  const running = /\brunning\b/.test(lower);
+  const stopped = /\b(exited|stopped|dead|created|removing)\b/.test(lower);
+  let health = "unknown";
+  if (lower.includes("unhealthy")) health = "unhealthy";
+  else if (lower.includes("healthy")) health = "healthy";
+  else if (lower.includes("starting")) health = "starting";
+  return {
+    service: serviceName,
+    environment,
+    loading: false,
+    available: response?.status === "success",
+    running,
+    state: running ? "running" : stopped ? "stopped" : "unknown",
+    health,
+    raw: text,
+  };
 }
 
-function defaultRef(service, environment) {
-  if (environment === "prod") return service.default_branch || "main";
-  return envSummary(service, "dev").current_ref || "develop";
+function runtimeStatus(serviceName, environment) {
+  return (
+    state.runtimeStatus[runtimeKey(serviceName, environment)] || {
+      loading: true,
+      available: false,
+      running: false,
+      state: "unknown",
+      health: "unknown",
+      raw: "",
+    }
+  );
+}
+
+function renderRuntimeStatus(serviceName, environment) {
+  const summary = runtimeStatus(serviceName, environment);
+  if (summary.loading) {
+    return `<div class="status-stack"><span class="badge"><span class="dot"></span>loading</span></div>`;
+  }
+  const stateBadge =
+    summary.state === "running"
+      ? `<span class="badge success"><span class="dot"></span>running</span>`
+      : summary.state === "stopped"
+        ? `<span class="badge"><span class="dot"></span>stopped</span>`
+        : `<span class="badge failed"><span class="dot"></span>unknown</span>`;
+  const healthBadge =
+    summary.health === "healthy"
+      ? `<span class="badge success"><span class="dot"></span>healthy</span>`
+      : summary.health === "unhealthy"
+        ? `<span class="badge failed"><span class="dot"></span>unhealthy</span>`
+        : summary.health === "starting"
+          ? `<span class="badge running"><span class="dot"></span>starting</span>`
+          : `<span class="badge"><span class="dot"></span>no health</span>`;
+  return `<div class="status-stack">${stateBadge}${healthBadge}</div>`;
+}
+
+function renderVersionCell(serviceName, environment) {
+  const runtime = runtimeByName(serviceName, environment);
+  if (!runtime) return "-";
+  const ref = runtime.environment.current_ref || runtime.environment.current_version || "-";
+  const commit = shortCommit(runtime.environment.current_commit);
+  return `
+    <div class="version-stack">
+      <div class="mono">${escapeHtml(ref)}</div>
+      <div class="subtle mono">${escapeHtml(commit)}</div>
+    </div>
+  `;
 }
 
 async function loadAll() {
@@ -166,17 +234,64 @@ async function loadAll() {
   const details = await Promise.all(services.map((service) => api(`/api/services/${service.name}`)));
   state.services = details;
   state.jobs = jobs.jobs || [];
-  syncOverlayState();
+  ensureExpandedState();
+  syncCurrentView();
   render();
+  refreshRuntimeStatuses();
 }
 
-function syncOverlayState() {
-  if (state.serviceDrawer && !serviceByName(state.serviceDrawer.service)) state.serviceDrawer = null;
-  if (state.envDrawer && !serviceByName(state.envDrawer.service)) state.envDrawer = null;
-  if (state.logsDrawer && !serviceByName(state.logsDrawer.service)) state.logsDrawer = null;
-  if (state.historyDrawer && !serviceByName(state.historyDrawer.service)) state.historyDrawer = null;
-  if (state.deployModal && !serviceByName(state.deployModal.service)) state.deployModal = null;
-  if (state.jobsFilter.service && !serviceByName(state.jobsFilter.service)) state.jobsFilter.service = "";
+function ensureExpandedState() {
+  state.services.forEach((service) => {
+    if (state.expandedServices[service.name] === undefined) {
+      state.expandedServices[service.name] = false;
+    }
+  });
+}
+
+function syncCurrentView() {
+  if (state.currentView.name === "service" && !serviceByName(state.currentView.service)) {
+    state.currentView = { name: "services" };
+  }
+  if (state.currentView.name === "runtime" && !runtimeByName(state.currentView.service, state.currentView.environment)) {
+    state.currentView = { name: "services" };
+  }
+  if (state.jobsFilter.service && !serviceByName(state.jobsFilter.service)) {
+    state.jobsFilter.service = "";
+  }
+}
+
+async function refreshRuntimeStatuses() {
+  const runtimes = state.services.flatMap((service) => ["prod", "dev"].map((environment) => ({ service: service.name, environment })));
+  runtimes.forEach(({ service, environment }) => {
+    state.runtimeStatus[runtimeKey(service, environment)] = {
+      ...runtimeStatus(service, environment),
+      loading: true,
+    };
+  });
+  render();
+  const results = await Promise.all(
+    runtimes.map(async ({ service, environment }) => {
+      try {
+        const response = await api(`/api/services/${service}/status?environment=${environment}`);
+        return parseRuntimeStatus(service, environment, response);
+      } catch (error) {
+        return {
+          service,
+          environment,
+          loading: false,
+          available: false,
+          running: false,
+          state: "unknown",
+          health: "unknown",
+          raw: String(error.message),
+        };
+      }
+    }),
+  );
+  results.forEach((item) => {
+    state.runtimeStatus[runtimeKey(item.service, item.environment)] = item;
+  });
+  render();
 }
 
 function setToast(message) {
@@ -197,11 +312,9 @@ function render() {
       <main class="main">
         ${renderTopbar()}
         <section class="content">
-          ${state.currentView === "jobs" ? renderJobsView() : renderServicesView()}
+          ${renderCurrentView()}
         </section>
       </main>
-      ${state.serviceDrawer ? renderServiceDrawer() : ""}
-      ${state.envDrawer ? renderEnvDrawer() : ""}
       ${state.logsDrawer ? renderLogsDrawer() : ""}
       ${state.historyDrawer ? renderHistoryDrawer() : ""}
       ${state.addOpen ? renderAddPanel() : ""}
@@ -223,17 +336,12 @@ function renderSidebar() {
       </div>
       <div class="nav-block">
         <div class="nav-label">Workspace</div>
-        <button class="nav-item ${state.currentView === "services" ? "active" : ""}" onclick="setView('services')">${icon("server")} Services</button>
-        <button class="nav-item ${state.currentView === "jobs" ? "active" : ""}" onclick="setView('jobs')">${icon("list")} Jobs</button>
+        <button class="nav-item ${state.currentView.name === "services" ? "active" : ""}" onclick="showServicesPage()">${icon("server")} Services</button>
+        <button class="nav-item ${state.currentView.name === "jobs" ? "active" : ""}" onclick="showJobsPage()">${icon("list")} Jobs</button>
       </div>
       <div class="nav-block service-list">
         <div class="nav-label">Catalog</div>
-        ${state.services.map((service) => `
-          <button class="nav-item" onclick="scrollToService('${escapeHtml(service.name)}')">
-            <span class="dot" style="color:${serviceColor(service.name)}"></span>
-            <span class="ellipsis">${escapeHtml(service.name)}</span>
-          </button>
-        `).join("")}
+        ${state.services.map(renderSidebarService).join("")}
       </div>
       <div class="nav-block">
         <button class="nav-item" onclick="toggleTheme()">${icon(state.theme === "dark" ? "sun" : "moon")} ${state.theme === "dark" ? "Light theme" : "Dark theme"}</button>
@@ -242,121 +350,295 @@ function renderSidebar() {
   `;
 }
 
+function renderSidebarService(service) {
+  const expanded = state.expandedServices[service.name];
+  const isServicePage = state.currentView.name === "service" && state.currentView.service === service.name;
+  return `
+    <div class="tree-item">
+      <button class="nav-item ${isServicePage ? "active" : ""}" onclick="openServicePage('${escapeHtml(service.name)}')">
+        <span class="tree-chevron" onclick="event.stopPropagation();toggleServiceTree('${escapeHtml(service.name)}')">${expanded ? icon("chevronDown", 14) : icon("chevronRight", 14)}</span>
+        <span class="dot" style="color:${serviceColor(service.name)}"></span>
+        <span class="ellipsis">${escapeHtml(service.name)}</span>
+      </button>
+      ${expanded
+        ? `
+          <div class="tree-children">
+            ${["prod", "dev"].map((environment) => `
+              <button class="nav-item child ${state.currentView.name === "runtime" && state.currentView.service === service.name && state.currentView.environment === environment ? "active" : ""}" onclick="openRuntimePage('${escapeHtml(service.name)}', '${environment}')">
+                <span class="tree-indent"></span>
+                <span class="mono">${escapeHtml(environment)}</span>
+              </button>
+            `).join("")}
+          </div>
+        `
+        : ""}
+    </div>
+  `;
+}
+
 function renderTopbar() {
   const activeJobs = state.jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
   const failedJobs = state.jobs.filter((job) => job.status === "failed").length;
+  const title = state.currentView.name === "jobs"
+    ? "Runtime jobs"
+    : state.currentView.name === "service"
+      ? `Service: ${state.currentView.service}`
+      : state.currentView.name === "runtime"
+        ? `Runtime: ${state.currentView.service}/${state.currentView.environment}`
+        : "Services dashboard";
   return `
     <header class="topbar">
       <div>
-        <h1>${state.currentView === "jobs" ? "Runtime jobs" : "Services dashboard"}</h1>
+        <h1>${escapeHtml(title)}</h1>
         <div class="hint">${state.services.length} services · ${activeJobs} active jobs · ${failedJobs} failed jobs</div>
       </div>
       <div class="spacer"></div>
       <button class="btn secondary" onclick="refreshData()">${icon("refresh")} Refresh</button>
-      ${state.currentView === "services" ? `<button class="btn primary" onclick="openAddService()">${icon("plus")} Add service</button>` : ""}
+      ${state.currentView.name !== "jobs" ? `<button class="btn primary" onclick="openAddService()">${icon("plus")} Add service</button>` : ""}
     </header>
   `;
+}
+
+function renderCurrentView() {
+  if (state.currentView.name === "jobs") return renderJobsView();
+  if (state.currentView.name === "service") return renderServicePage();
+  if (state.currentView.name === "runtime") return renderRuntimePage();
+  return renderServicesView();
 }
 
 function renderServicesView() {
   const successful = state.jobs.filter((job) => job.status === "success").length;
   const failed = state.jobs.filter((job) => job.status === "failed").length;
+  const rows = state.services.flatMap((service) =>
+    ["prod", "dev"].map((environment) => renderServiceTableRow(service, environment)),
+  );
   return `
     <div class="toolbar">
       <div>
-        <div class="headline">Runtime targets</div>
-        <div class="muted">Each service owns two independent runtime targets: <span class="mono">prod</span> and <span class="mono">dev</span>.</div>
+        <div class="headline">Runtime table</div>
+        <div class="muted">One row equals one runtime target: service plus environment.</div>
       </div>
       <div class="row wrap">
         <span class="badge success"><span class="dot"></span>${successful} successful</span>
         <span class="badge failed"><span class="dot"></span>${failed} failed</span>
       </div>
     </div>
-    ${state.services.length ? `<div class="service-stack">${state.services.map(renderServiceRow).join("")}</div>` : renderEmpty()}
+    ${state.services.length
+      ? `
+        <div class="table table-wide">
+          <div class="table-row table-head services-table-head">
+            <div>Service</div>
+            <div>Environment</div>
+            <div>Link</div>
+            <div>Status</div>
+            <div>Version</div>
+            <div>Quick</div>
+            <div>Actions</div>
+          </div>
+          ${rows.join("")}
+        </div>
+      `
+      : renderEmpty()}
   `;
 }
 
-function renderServiceRow(service) {
-  const color = serviceColor(service.name);
+function renderServiceTableRow(service, environment) {
+  const summary = runtimeStatus(service.name, environment);
+  const activeJob = activeJobForRuntime(service.name, environment);
+  const canOpenLink = summary.running;
+  const menuOpen =
+    state.actionMenu &&
+    state.actionMenu.service === service.name &&
+    state.actionMenu.environment === environment;
   return `
-    <article class="service-row card" id="service-${escapeHtml(service.name)}">
-      <div class="service-row-header">
-        <div class="service-title">
-          <div class="service-icon" style="background:${color}">${escapeHtml(serviceInitials(service.name))}</div>
-          <div class="service-heading">
-            <h2 class="service-name">${escapeHtml(service.name)}</h2>
-            <div class="muted mono ellipsis">${escapeHtml(formatSource(service))}</div>
-          </div>
+    <div class="table-row services-table-row">
+      <div class="service-cell">
+        <div class="service-icon small" style="background:${serviceColor(service.name)}">${escapeHtml(serviceInitials(service.name))}</div>
+        <div>
+          <div class="service-link-button" onclick="openServicePage('${escapeHtml(service.name)}')">${escapeHtml(service.name)}</div>
+          <div class="subtle mono ellipsis">${escapeHtml(shortCommit(service.source_status?.current_commit))}</div>
         </div>
-        <div class="service-meta">
+      </div>
+      <div><span class="badge">${escapeHtml(environment)}</span></div>
+      <div>
+        ${canOpenLink
+          ? `<a class="table-link mono" href="${escapeHtml(runtimeUrl(service.name, environment))}" target="_blank" rel="noreferrer">${escapeHtml(runtimeUrl(service.name, environment))}</a>`
+          : `<span class="subtle">not exposed</span>`}
+      </div>
+      <div>
+        ${renderRuntimeStatus(service.name, environment)}
+        ${activeJob ? `<div class="subtle mono top-gap">${escapeHtml(activeJob.action)}</div>` : ""}
+      </div>
+      <div>${renderVersionCell(service.name, environment)}</div>
+      <div class="quick-actions">
+        <button class="btn ghost" onclick="openServicePage('${escapeHtml(service.name)}')">Service</button>
+        <button class="btn ghost" onclick="openLogsDrawer('${escapeHtml(service.name)}', '${environment}')">Logs</button>
+        <button class="btn ghost" onclick="openRuntimePage('${escapeHtml(service.name)}', '${environment}')">Settings</button>
+      </div>
+      <div class="action-menu-wrap">
+        <button class="btn secondary" onclick="toggleActionMenu('${escapeHtml(service.name)}', '${environment}')">${icon("more")} Actions</button>
+        ${menuOpen ? renderActionMenu(service.name, environment) : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderActionMenu(serviceName, environment) {
+  return `
+    <div class="action-menu">
+      <button class="action-item" onclick="openDeployModal('${escapeHtml(serviceName)}', '${environment}')">Deploy</button>
+      <button class="action-item" onclick="runtimeAction('${escapeHtml(serviceName)}', 'restart', '${environment}')">Restart</button>
+      <button class="action-item" onclick="runtimeAction('${escapeHtml(serviceName)}', 'stop', '${environment}')">Stop</button>
+      <button class="action-item" onclick="runtimeAction('${escapeHtml(serviceName)}', 'down', '${environment}')">Down</button>
+      <button class="action-item" onclick="openHistoryDrawer('${escapeHtml(serviceName)}', '${environment}')">History</button>
+    </div>
+  `;
+}
+
+function renderServicePage() {
+  const service = serviceByName(state.currentView.service);
+  if (!service) return renderMissing("Unknown service");
+  return `
+    <div class="page-stack">
+      <section class="card page-card">
+        <div class="page-header">
+          <div class="service-title">
+            <div class="service-icon" style="background:${serviceColor(service.name)}">${escapeHtml(serviceInitials(service.name))}</div>
+            <div>
+              <h2 class="service-name">${escapeHtml(service.name)}</h2>
+              <div class="muted">Shared service definition and source settings.</div>
+            </div>
+          </div>
           <div class="row wrap">
             ${sourceBadge(service)}
-            ${service.source_status?.current_ref ? `<span class="badge">${escapeHtml(service.source_status.current_ref)}</span>` : ""}
+            ${service.source_status?.current_ref ? `<span class="badge mono">${escapeHtml(service.source_status.current_ref)}</span>` : ""}
             ${service.source_status?.current_commit ? `<span class="badge mono">${escapeHtml(shortCommit(service.source_status.current_commit))}</span>` : ""}
           </div>
-          <div class="row">
-            <button class="btn ghost" onclick="openServiceDrawer('${escapeHtml(service.name)}')">${icon("gear")} Source</button>
-          </div>
         </div>
-      </div>
-      ${service.source_status?.error ? `<div class="inline-error">${escapeHtml(service.source_status.error)}</div>` : ""}
-      <div class="runtime-grid">
-        ${renderRuntimeCard(service, "prod")}
-        ${renderRuntimeCard(service, "dev")}
-      </div>
-    </article>
+        <div class="details-grid">
+          <div class="field"><label>Source type</label><input class="input" value="${escapeHtml(service.source_type)}" disabled></div>
+          <div class="field"><label>Default branch</label><input class="input mono" value="${escapeHtml(service.default_branch || "")}" disabled></div>
+          <div class="field field-span"><label>Source</label><input class="input mono" value="${escapeHtml(formatSource(service))}" disabled></div>
+          <div class="field field-span"><label>Managed checkout</label><input class="input mono" value="${escapeHtml(service.source_path)}" disabled></div>
+        </div>
+        ${service.source_status?.error ? `<div class="inline-error">${escapeHtml(service.source_status.error)}</div>` : ""}
+      </section>
+      <section class="card page-card">
+        <div class="section-title">Runtime targets</div>
+        <div class="runtime-mini-grid">
+          ${["prod", "dev"].map((environment) => `
+            <button class="runtime-mini-card" onclick="openRuntimePage('${escapeHtml(service.name)}', '${environment}')">
+              <div class="runtime-mini-head">
+                <span class="badge">${escapeHtml(environment)}</span>
+                ${renderRuntimeStatus(service.name, environment)}
+              </div>
+              <div class="muted mono">${escapeHtml(runtimeUrl(service.name, environment))}</div>
+              <div class="mono top-gap">${escapeHtml(envSummary(service, environment).current_ref || "-")}</div>
+            </button>
+          `).join("")}
+        </div>
+      </section>
+      <section class="card page-card danger-card">
+        <div class="section-title">Danger zone</div>
+        <button class="btn danger" onclick="removeService('${escapeHtml(service.name)}')">${icon("trash")} Remove service from catalog</button>
+      </section>
+    </div>
   `;
 }
 
-function renderRuntimeCard(service, environment) {
+function renderRuntimePage() {
+  const service = serviceByName(state.currentView.service);
+  if (!service) return renderMissing("Unknown service");
+  const environment = state.currentView.environment;
   const env = envSummary(service, environment);
-  const job = latestRuntimeJob(service.name, environment);
-  const envCount = Object.keys(env.env || {}).length;
+  const envPairs = Object.entries(env.env || {});
+  const summary = runtimeStatus(service.name, environment);
+  const jobs = state.jobs.filter((job) => job.service === service.name && job.environment === environment);
   return `
-    <section class="runtime-card">
-      <div class="runtime-head">
-        <div>
-          <div class="runtime-label">${escapeHtml(environmentLabel(environment))}</div>
-          <div class="runtime-name mono">${escapeHtml(service.name)}/${escapeHtml(environment)}</div>
+    <div class="page-stack">
+      <section class="card page-card">
+        <div class="page-header">
+          <div>
+            <div class="headline-small">${escapeHtml(service.name)}/${escapeHtml(environment)}</div>
+            <div class="muted">Runtime-specific settings and actions.</div>
+          </div>
+          <div class="row wrap">
+            ${renderRuntimeStatus(service.name, environment)}
+          </div>
         </div>
-        ${runtimeStatusBadge(service, environment)}
-      </div>
-      <div class="runtime-facts">
-        <div class="fact">
-          <span class="fact-label">Subdomain</span>
-          <span class="fact-value mono">${escapeHtml(env.subdomain || service.name)}</span>
+        <div class="runtime-page-grid">
+          <div class="fact">
+            <span class="fact-label">Public URL</span>
+            <span class="fact-value">${summary.running ? `<a class="table-link mono" href="${escapeHtml(runtimeUrl(service.name, environment))}" target="_blank" rel="noreferrer">${escapeHtml(runtimeUrl(service.name, environment))}</a>` : `<span class="subtle">not exposed</span>`}</span>
+          </div>
+          <div class="fact">
+            <span class="fact-label">Current ref</span>
+            <span class="fact-value mono">${escapeHtml(env.current_ref || env.current_version || "-")}</span>
+          </div>
+          <div class="fact">
+            <span class="fact-label">Current commit</span>
+            <span class="fact-value mono">${escapeHtml(shortCommit(env.current_commit))}</span>
+          </div>
+          <div class="fact">
+            <span class="fact-label">Last deployment</span>
+            <span class="fact-value mono">${escapeHtml(env.last_deployment_id ? `#${env.last_deployment_id}` : "-")}</span>
+          </div>
         </div>
-        <div class="fact">
-          <span class="fact-label">Ref</span>
-          <span class="fact-value mono">${escapeHtml(env.current_ref || env.current_version || "-")}</span>
+        <div class="runtime-button-row">
+          <button class="btn primary" onclick="openDeployModal('${escapeHtml(service.name)}', '${environment}')">${icon("play")} Deploy</button>
+          <button class="btn secondary" onclick="runtimeAction('${escapeHtml(service.name)}', 'restart', '${environment}')">${icon("refresh")} Restart</button>
+          <button class="btn secondary" onclick="runtimeAction('${escapeHtml(service.name)}', 'stop', '${environment}')">${icon("stop")} Stop</button>
+          <button class="btn danger" onclick="runtimeAction('${escapeHtml(service.name)}', 'down', '${environment}')">${icon("trash")} Down</button>
+          <button class="btn secondary" onclick="openLogsDrawer('${escapeHtml(service.name)}', '${environment}')">${icon("list")} Logs</button>
+          <button class="btn secondary" onclick="openHistoryDrawer('${escapeHtml(service.name)}', '${environment}')">${icon("history")} History</button>
         </div>
-        <div class="fact">
-          <span class="fact-label">Commit</span>
-          <span class="fact-value mono">${escapeHtml(shortCommit(env.current_commit))}</span>
+      </section>
+      <section class="card page-card">
+        <div class="section-title">Environment variables</div>
+        <form onsubmit="saveEnvVar(event, '${escapeHtml(service.name)}', '${environment}')" class="inline-form">
+          <input class="input mono" name="key" placeholder="KEY" required>
+          <input class="input mono" name="value" placeholder="value" required>
+          <button class="btn primary" type="submit">${icon("plus")} Set</button>
+        </form>
+        <div class="table">
+          <div class="table-row table-head env-table-head">
+            <div>Key</div>
+            <div>Value</div>
+            <div></div>
+          </div>
+          ${envPairs.length
+            ? envPairs.map(([key, value]) => `
+              <div class="table-row env-table-row">
+                <div class="mono">${escapeHtml(key)}</div>
+                <div class="mono value-wrap">${escapeHtml(value)}</div>
+                <button class="btn ghost" onclick="unsetEnvVar('${escapeHtml(service.name)}', '${environment}', '${escapeHtml(key)}')">unset</button>
+              </div>
+            `).join("")
+            : `<div class="table-empty muted">No variables configured for ${escapeHtml(service.name)}/${escapeHtml(environment)}.</div>`}
         </div>
-        <div class="fact">
-          <span class="fact-label">Env vars</span>
-          <span class="fact-value">${envCount}</span>
+      </section>
+      <section class="card page-card">
+        <div class="section-title">Recent jobs</div>
+        <div class="table">
+          <div class="table-row table-head runtime-jobs-head">
+            <div>Action</div>
+            <div>Status</div>
+            <div>Ref</div>
+            <div>Finished</div>
+          </div>
+          ${jobs.length
+            ? jobs.slice(0, 10).map((job) => `
+              <div class="table-row runtime-jobs-row">
+                <div class="mono">${escapeHtml(job.action)}</div>
+                <div>${jobBadge(job.status)}</div>
+                <div class="mono">${escapeHtml(job.ref || job.version || "-")}</div>
+                <div class="subtle">${escapeHtml(formatTime(job.finished_at || job.started_at || job.created_at))}</div>
+              </div>
+            `).join("")
+            : `<div class="table-empty muted">No jobs yet for ${escapeHtml(service.name)}/${escapeHtml(environment)}.</div>`}
         </div>
-        <div class="fact">
-          <span class="fact-label">Last deploy</span>
-          <span class="fact-value mono">${escapeHtml(env.last_deployment_id ? `#${env.last_deployment_id}` : "-")}</span>
-        </div>
-        <div class="fact">
-          <span class="fact-label">Last job</span>
-          <span class="fact-value">${job ? jobBadge(job.status, job.action) : `<span class="subtle">none</span>`}</span>
-        </div>
-      </div>
-      <div class="runtime-actions">
-        <button class="btn primary" onclick="openDeployModal('${escapeHtml(service.name)}', '${escapeHtml(environment)}')">${icon("play")} Deploy</button>
-        <button class="btn secondary" onclick="runtimeAction('${escapeHtml(service.name)}', 'restart', '${escapeHtml(environment)}')">${icon("refresh")} Restart</button>
-        <button class="btn secondary" onclick="runtimeAction('${escapeHtml(service.name)}', 'stop', '${escapeHtml(environment)}')">${icon("stop")} Stop</button>
-        <button class="btn danger" onclick="runtimeAction('${escapeHtml(service.name)}', 'down', '${escapeHtml(environment)}')">${icon("trash")} Down</button>
-        <button class="btn secondary" onclick="openLogsDrawer('${escapeHtml(service.name)}', '${escapeHtml(environment)}')">${icon("list")} Logs</button>
-        <button class="btn secondary" onclick="openEnvDrawer('${escapeHtml(service.name)}', '${escapeHtml(environment)}')">${icon("gear")} Env</button>
-        <button class="btn secondary" onclick="openHistoryDrawer('${escapeHtml(service.name)}', '${escapeHtml(environment)}')">${icon("history")} History</button>
-      </div>
-    </section>
+      </section>
+    </div>
   `;
 }
 
@@ -417,6 +699,10 @@ function renderGlobalJobRow(job) {
   `;
 }
 
+function renderMissing(title) {
+  return `<div class="empty"><div style="font-weight:800">${escapeHtml(title)}</div></div>`;
+}
+
 function renderEmpty() {
   return `
     <div class="empty">
@@ -428,87 +714,8 @@ function renderEmpty() {
   `;
 }
 
-function renderServiceDrawer() {
-  const service = serviceByName(state.serviceDrawer.service);
-  if (!service) return "";
-  return `
-    <div class="overlay-backdrop" onclick="closeServiceDrawer()"></div>
-    <aside class="drawer">
-      <div class="drawer-header">
-        <div class="row">
-          <div class="service-icon" style="background:${serviceColor(service.name)}">${escapeHtml(serviceInitials(service.name))}</div>
-          <div>
-            <div class="drawer-title">${escapeHtml(service.name)}</div>
-            <div class="muted">Source definition and shared settings.</div>
-          </div>
-          <div class="spacer"></div>
-          <button class="btn ghost" onclick="closeServiceDrawer()">${icon("close")}</button>
-        </div>
-      </div>
-      <div class="drawer-body">
-        <div class="section">
-          <div class="section-title">Source</div>
-          <div class="field"><label>Source type</label><input class="input" value="${escapeHtml(service.source_type)}" disabled></div>
-          <div class="field"><label>Source</label><input class="input mono" value="${escapeHtml(formatSource(service))}" disabled></div>
-          <div class="field"><label>Default branch</label><input class="input mono" value="${escapeHtml(service.default_branch || "")}" disabled></div>
-          <div class="field"><label>Managed checkout</label><input class="input mono" value="${escapeHtml(service.source_path)}" disabled></div>
-          <div class="field"><label>Current ref</label><input class="input mono" value="${escapeHtml(service.source_status?.current_ref || "")}" disabled></div>
-          <div class="field"><label>Current commit</label><input class="input mono" value="${escapeHtml(service.source_status?.current_commit || "")}" disabled></div>
-          ${service.source_status?.error ? `<div class="field"><label>Source error</label><textarea class="textarea mono" disabled>${escapeHtml(service.source_status.error)}</textarea></div>` : ""}
-        </div>
-        <div class="section">
-          <div class="section-title">Danger zone</div>
-          <button class="btn danger" onclick="removeService('${escapeHtml(service.name)}')">${icon("trash")} Remove service from catalog</button>
-        </div>
-      </div>
-    </aside>
-  `;
-}
-
-function renderEnvDrawer() {
-  const service = serviceByName(state.envDrawer.service);
-  if (!service) return "";
-  const environment = state.envDrawer.environment;
-  const env = envSummary(service, environment);
-  const pairs = Object.entries(env.env || {});
-  return `
-    <div class="overlay-backdrop" onclick="closeEnvDrawer()"></div>
-    <aside class="drawer">
-      <div class="drawer-header">
-        <div class="row">
-          <div>
-            <div class="drawer-title">Env: ${escapeHtml(service.name)}/${escapeHtml(environment)}</div>
-            <div class="muted">Environment variables are scoped to one runtime target.</div>
-          </div>
-          <div class="spacer"></div>
-          <button class="btn ghost" onclick="closeEnvDrawer()">${icon("close")}</button>
-        </div>
-      </div>
-      <div class="drawer-body">
-        <form onsubmit="saveEnvVar(event, '${escapeHtml(service.name)}', '${escapeHtml(environment)}')" class="inline-form">
-          <input class="input mono" name="key" placeholder="KEY" required>
-          <input class="input mono" name="value" placeholder="value" required>
-          <button class="btn primary" type="submit">${icon("plus")} Set</button>
-        </form>
-        <div class="table">
-          <div class="table-row table-head env-table-head"><div>Key</div><div>Value</div><div></div></div>
-          ${pairs.length ? pairs.map(([key, value]) => `
-            <div class="table-row env-table-row">
-              <div class="mono">${escapeHtml(key)}</div>
-              <div class="mono value-wrap">${escapeHtml(value)}</div>
-              <button class="btn ghost" onclick="unsetEnvVar('${escapeHtml(service.name)}', '${escapeHtml(environment)}', '${escapeHtml(key)}')">unset</button>
-            </div>
-          `).join("") : `<div class="table-empty muted">No variables configured for ${escapeHtml(service.name)}/${escapeHtml(environment)}.</div>`}
-        </div>
-      </div>
-    </aside>
-  `;
-}
-
 function renderLogsDrawer() {
   const drawer = state.logsDrawer;
-  const service = serviceByName(drawer.service);
-  if (!service) return "";
   return `
     <div class="overlay-backdrop" onclick="closeLogsDrawer()"></div>
     <aside class="drawer drawer-wide">
@@ -539,8 +746,6 @@ function renderLogsDrawer() {
 
 function renderHistoryDrawer() {
   const drawer = state.historyDrawer;
-  const service = serviceByName(drawer.service);
-  if (!service) return "";
   return `
     <div class="overlay-backdrop" onclick="closeHistoryDrawer()"></div>
     <aside class="drawer drawer-wide">
@@ -632,7 +837,6 @@ function renderAddPanel() {
 function renderDeployModal() {
   const modal = state.deployModal;
   const service = serviceByName(modal.service);
-  if (!service) return "";
   return `
     <div class="overlay-backdrop modal-backdrop" onclick="closeDeployModal()"></div>
     <div class="modal">
@@ -653,7 +857,7 @@ function renderDeployModal() {
         </div>
         <div class="field">
           <label>Source status</label>
-          <input class="input" value="${escapeHtml(service.source_status?.available ? "source fetched" : "source unavailable")}" disabled>
+          <input class="input" value="${escapeHtml(service?.source_status?.available ? "source fetched" : "source unavailable")}" disabled>
         </div>
         ${modal.error ? `<div class="inline-error">${escapeHtml(modal.error)}</div>` : ""}
         <div class="row actions-end">
@@ -678,24 +882,48 @@ function toggleTheme() {
   render();
 }
 
-function setView(view) {
-  state.currentView = view;
+function showServicesPage() {
+  state.currentView = { name: "services" };
+  state.actionMenu = null;
   render();
 }
 
-function scrollToService(name) {
-  state.currentView = "services";
+function showJobsPage() {
+  state.currentView = { name: "jobs" };
+  state.actionMenu = null;
   render();
-  requestAnimationFrame(() => {
-    const element = document.getElementById(`service-${name}`);
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  });
+}
+
+function toggleServiceTree(service) {
+  state.expandedServices[service] = !state.expandedServices[service];
+  render();
+}
+
+function openServicePage(service) {
+  state.expandedServices[service] = true;
+  state.currentView = { name: "service", service };
+  state.actionMenu = null;
+  render();
+}
+
+function openRuntimePage(service, environment) {
+  state.expandedServices[service] = true;
+  state.currentView = { name: "runtime", service, environment };
+  state.actionMenu = null;
+  render();
 }
 
 function setJobsFilter(key, value) {
   state.jobsFilter[key] = value;
+  render();
+}
+
+function toggleActionMenu(service, environment) {
+  if (state.actionMenu && state.actionMenu.service === service && state.actionMenu.environment === environment) {
+    state.actionMenu = null;
+  } else {
+    state.actionMenu = { service, environment };
+  }
   render();
 }
 
@@ -714,26 +942,6 @@ function setAddSourceType(sourceType) {
   render();
 }
 
-function openServiceDrawer(service) {
-  state.serviceDrawer = { service };
-  render();
-}
-
-function closeServiceDrawer() {
-  state.serviceDrawer = null;
-  render();
-}
-
-function openEnvDrawer(service, environment) {
-  state.envDrawer = { service, environment };
-  render();
-}
-
-function closeEnvDrawer() {
-  state.envDrawer = null;
-  render();
-}
-
 async function openLogsDrawer(service, environment) {
   state.logsDrawer = {
     service,
@@ -742,6 +950,7 @@ async function openLogsDrawer(service, environment) {
     log: "",
     statusText: "",
   };
+  state.actionMenu = null;
   render();
   await reloadLogsDrawer();
 }
@@ -788,6 +997,7 @@ async function openHistoryDrawer(service, environment) {
     loading: true,
     deployments: [],
   };
+  state.actionMenu = null;
   render();
   await reloadHistoryDrawer();
 }
@@ -827,10 +1037,11 @@ async function openDeployModal(service, environment) {
   state.deployModal = {
     service,
     environment,
-    ref: svc ? defaultRef(svc, environment) : "",
+    ref: environment === "prod" ? svc?.default_branch || "main" : envSummary(svc, "dev").current_ref || "develop",
     refs: [],
     error: "",
   };
+  state.actionMenu = null;
   render();
   try {
     const response = await api(`/api/services/${service}/refs`);
@@ -915,6 +1126,7 @@ async function unsetEnvVar(service, environment, key) {
 }
 
 async function runtimeAction(service, action, environment) {
+  state.actionMenu = null;
   if (["down", "stop"].includes(action) && !confirm(`${action} ${service}/${environment}?`)) return;
   await scheduleJob(service, action, environment);
 }
@@ -955,7 +1167,7 @@ async function removeService(name) {
   if (!confirm(`Remove ${name} from the catalog?`)) return;
   try {
     await api(`/api/services/${name}`, { method: "DELETE" });
-    closeServiceDrawer();
+    state.currentView = { name: "services" };
     await loadAll();
     setToast(`Service ${name} removed`);
   } catch (error) {
