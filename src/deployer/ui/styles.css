@@ -522,7 +522,7 @@ button:disabled {
 
 .runtime-jobs-head,
 .runtime-jobs-row {
-  grid-template-columns: 96px 132px 1fr 170px;
+  grid-template-columns: 96px 132px 1fr 170px 92px;
 }
 
 .table-empty {

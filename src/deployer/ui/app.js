@@ -625,6 +625,7 @@ function renderRuntimePage() {
             <div>Status</div>
             <div>Ref</div>
             <div>Finished</div>
+            <div></div>
           </div>
           ${jobs.length
             ? jobs.slice(0, 10).map((job) => `
@@ -633,6 +634,7 @@ function renderRuntimePage() {
                 <div>${jobBadge(job.status)}</div>
                 <div class="mono">${escapeHtml(job.ref || job.version || "-")}</div>
                 <div class="subtle">${escapeHtml(formatTime(job.finished_at || job.started_at || job.created_at))}</div>
+                <div><button class="btn ghost" onclick="openJobDrawer(${job.id})">Output</button></div>
               </div>
             `).join("")
             : `<div class="table-empty muted">No jobs yet for ${escapeHtml(service.name)}/${escapeHtml(environment)}.</div>`}
