@@ -50,12 +50,18 @@ def test_cli_stop_dry_run_and_history_environment(tmp_path: Path, capsys):
     state_db = tmp_path / "state.db"
 
     assert main(["stop", str(project), "--state-db", str(state_db), "--dry-run", "--environment", "dev"]) == 0
-    assert "down" in capsys.readouterr().out
+    assert " stop" in capsys.readouterr().out
 
     assert main(["history", "myapp", "--state-db", str(state_db), "--environment", "dev"]) == 0
     output = capsys.readouterr().out
     assert "dev" in output
     assert "stop" in output
+
+    assert main(["down", str(project), "--state-db", str(state_db), "--dry-run", "--environment", "dev"]) == 0
+    assert " down" in capsys.readouterr().out
+
+    assert main(["restart", str(project), "--state-db", str(state_db), "--dry-run", "--environment", "dev"]) == 0
+    assert " restart" in capsys.readouterr().out
 
 
 def test_cli_service_catalog_local_workflow(tmp_path: Path, capsys):
@@ -118,6 +124,54 @@ def test_cli_service_catalog_local_workflow(tmp_path: Path, capsys):
     output = capsys.readouterr().out
     assert "Dry run" in output
     assert str(runtime_dir / "services" / "myapp" / "overrides" / "prod.override.yml") in output
+
+    assert (
+        main(
+            [
+                "stop",
+                "myapp",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    assert " stop" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "down",
+                "myapp",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    assert " down" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "restart",
+                "myapp",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    assert " restart" in capsys.readouterr().out
 
     assert (
         main(

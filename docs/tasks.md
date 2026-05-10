@@ -29,7 +29,7 @@
 - [x] Track deployment history by project and environment
 - [x] Add `stop` command
 - [x] Add `status` command
-- [ ] Add `logs` command
+- [x] Add `logs` command
 - [ ] Move default state DB to `/var/lib/deployer/state.db` in packaged service usage
 - [ ] Run CLI from inside the deployer container through Docker socket proxy
 
@@ -44,9 +44,10 @@
 - [x] Add environment variable storage
 - [x] Render env files to managed workspace
 - [x] Change primary CLI workflow to service names for deploy/stop/status
-- [ ] Keep path-based commands for development/debug use
-- [ ] Add `restart` command
-- [ ] Add `logs` command
+- [x] Keep path-based commands for development/debug use
+- [x] Add `restart` command
+- [x] Add `logs` command
+- [x] Split `stop` and `down` command semantics
 - [ ] Add service-based history output enriched with current ref/commit
 - [ ] Add conflict-safe duplicate service handling with clearer errors
 - [ ] Add integration tests for git source using a real local bare repository

@@ -167,6 +167,40 @@ class ServiceCatalog:
             env_file=str(runtime.env_file),
         )
 
+    def down(
+        self,
+        service_name: str,
+        engine: DeploymentEngine,
+        environment: str = "prod",
+        dry_run: bool = False,
+    ) -> DeployResult:
+        runtime = self.resolve_runtime(service_name, environment)
+        self.render_env_file(service_name, environment)
+        return engine.down(
+            runtime.project_dir,
+            dry_run=dry_run,
+            environment=environment,
+            override_dir=runtime.override_dir,
+            env_file=str(runtime.env_file),
+        )
+
+    def restart(
+        self,
+        service_name: str,
+        engine: DeploymentEngine,
+        environment: str = "prod",
+        dry_run: bool = False,
+    ) -> DeployResult:
+        runtime = self.resolve_runtime(service_name, environment)
+        self.render_env_file(service_name, environment)
+        return engine.restart(
+            runtime.project_dir,
+            dry_run=dry_run,
+            environment=environment,
+            override_dir=runtime.override_dir,
+            env_file=str(runtime.env_file),
+        )
+
     def status(self, service_name: str, engine: DeploymentEngine, environment: str = "prod") -> CommandResult:
         runtime = self.resolve_runtime(service_name, environment)
         self.render_env_file(service_name, environment)
@@ -175,6 +209,23 @@ class ServiceCatalog:
             environment=environment,
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
+        )
+
+    def logs(
+        self,
+        service_name: str,
+        engine: DeploymentEngine,
+        environment: str = "prod",
+        tail: int = 200,
+    ) -> CommandResult:
+        runtime = self.resolve_runtime(service_name, environment)
+        self.render_env_file(service_name, environment)
+        return engine.logs(
+            runtime.project_dir,
+            environment=environment,
+            override_dir=runtime.override_dir,
+            env_file=str(runtime.env_file),
+            tail=tail,
         )
 
     def prepare_runtime(self, service_name: str, environment: str, ref: str | None = None) -> ServiceRuntime:

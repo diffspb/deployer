@@ -38,8 +38,17 @@ def test_compose_command_includes_all_files():
     down_command = compose_command(manifest, Path(".deployer/docker-compose.override.yml"), action="down")
     assert down_command[-1] == "down"
 
+    stop_command = compose_command(manifest, Path(".deployer/docker-compose.override.yml"), action="stop")
+    assert stop_command[-1] == "stop"
+
+    restart_command = compose_command(manifest, Path(".deployer/docker-compose.override.yml"), action="restart")
+    assert restart_command[-1] == "restart"
+
     ps_command = compose_command(manifest, Path(".deployer/docker-compose.override.yml"), action="ps")
     assert ps_command[-1] == "ps"
+
+    logs_command = compose_command(manifest, Path(".deployer/docker-compose.override.yml"), action="logs", tail=50)
+    assert logs_command[-3:] == ["logs", "--tail", "50"]
 
     dev_command = compose_command(manifest, Path(".deployer/docker-compose.override.yml"), environment="dev")
     assert dev_command[3] == "myapp-dev"
@@ -101,7 +110,7 @@ routes:
     assert state.history("myapp")[0].status == "failed"
 
 
-def test_stop_dry_run_uses_down_and_environment_override(tmp_path: Path):
+def test_stop_dry_run_uses_stop_and_environment_override(tmp_path: Path):
     (tmp_path / "docker-compose.yml").write_text("services: {}\n")
     (tmp_path / "deployer.yml").write_text(
         """
@@ -120,9 +129,34 @@ routes:
     assert result.status == "success"
     assert result.override_path.name == "dev.override.yml"
     assert " docker compose -p myapp-dev " in f" {result.log} "
+    assert result.log.split("Command: ", 1)[1].splitlines()[0].endswith(" stop")
     assert result.log.strip().endswith("Dry run: docker compose was not executed")
     record = state.history("myapp", environment="dev")[0]
     assert record.action == "stop"
+
+
+def test_down_and_restart_dry_run_record_actions(tmp_path: Path):
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "deployer.yml").write_text(
+        """
+name: myapp
+service: app
+port: 8000
+routes:
+  - subdomain: myapp
+"""
+    )
+    state = StateStore(tmp_path / "state.db")
+    engine = DeploymentEngine(state)
+
+    down = engine.down(tmp_path, dry_run=True)
+    restart = engine.restart(tmp_path, dry_run=True)
+
+    assert down.status == "success"
+    assert down.log.split("Command: ", 1)[1].splitlines()[0].endswith(" down")
+    assert restart.status == "success"
+    assert restart.log.split("Command: ", 1)[1].splitlines()[0].endswith(" restart")
+    assert [record.action for record in state.history("myapp", limit=2)] == ["restart", "down"]
 
 
 def test_status_returns_runner_output(tmp_path: Path):
@@ -150,3 +184,30 @@ routes:
 
     assert result.status == "success"
     assert result.log == "NAME STATUS\n"
+
+
+def test_logs_returns_runner_output(tmp_path: Path):
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "deployer.yml").write_text(
+        """
+name: myapp
+service: app
+port: 8000
+routes:
+  - subdomain: myapp
+"""
+    )
+
+    class LogsRunner:
+        def run(self, args, cwd):
+            from deployer.runner import CommandResult
+
+            assert args[-3:] == ["logs", "--tail", "10"]
+            return CommandResult(tuple(args), 0, "app log\n")
+
+    engine = DeploymentEngine(StateStore(tmp_path / "state.db"), runner=LogsRunner())
+
+    result = engine.logs(tmp_path, tail=10)
+
+    assert result.status == "success"
+    assert result.log == "app log\n"

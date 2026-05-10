@@ -91,4 +91,32 @@ Remaining risks:
 - Duplicate service errors are still low-level SQLite errors wrapped as catalog errors.
 - Git source support needs an integration test against a real local bare repository.
 - Service history is still keyed by project name and does not yet show enriched catalog metadata by default.
-- `restart` and `logs` commands are still missing.
+
+## Runtime Commands Review
+
+Date: 2026-05-10
+
+Commands run:
+
+```bash
+.venv/bin/python -m pytest --cov=deployer --cov-report=term-missing
+```
+
+Results:
+
+- 35 tests passed.
+- Coverage: 85.99%.
+- Coverage threshold: 80%.
+
+Implemented behavior:
+
+- `stop` now maps to `docker compose stop` and keeps containers.
+- `down` maps to `docker compose down` and removes containers.
+- `restart` maps to `docker compose restart`.
+- `logs` maps to `docker compose logs --tail <n>`.
+- All runtime commands support both catalog mode and path mode.
+
+Remaining risks:
+
+- `logs` is currently command-output based, not streaming.
+- `restart` does not run a post-restart healthcheck yet.

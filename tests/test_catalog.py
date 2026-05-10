@@ -57,7 +57,7 @@ def test_render_env_quotes_unsafe_values():
     assert render_env({"A": "plain", "B": "has space", "C": ""}) == 'A=plain\nB="has space"\nC=""\n'
 
 
-def test_catalog_stop_and_status_local_service(tmp_path: Path):
+def test_catalog_runtime_commands_local_service(tmp_path: Path):
     project = _project(tmp_path / "project")
     state = StateStore(tmp_path / "state.db")
     catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
@@ -67,16 +67,30 @@ def test_catalog_stop_and_status_local_service(tmp_path: Path):
         def run(self, args, cwd):
             if args[-1] == "ps":
                 return CommandResult(tuple(args), 0, "NAME STATUS\n")
+            if args[-3:] == ["logs", "--tail", "25"]:
+                return CommandResult(tuple(args), 0, "log line\n")
+            if args[-1] == "down":
+                return CommandResult(tuple(args), 0, "removed\n")
+            if args[-1] == "restart":
+                return CommandResult(tuple(args), 0, "restarted\n")
             return CommandResult(tuple(args), 0, "stopped\n")
 
     engine = DeploymentEngine(state, runner=Runner())
 
     stop = catalog.stop("myapp", engine, environment="prod")
+    down = catalog.down("myapp", engine, environment="prod")
+    restart = catalog.restart("myapp", engine, environment="prod")
     status = catalog.status("myapp", engine, environment="prod")
+    logs = catalog.logs("myapp", engine, environment="prod", tail=25)
 
     assert stop.status == "success"
     assert "stopped" in stop.log
+    assert down.status == "success"
+    assert "removed" in down.log
+    assert restart.status == "success"
+    assert "restarted" in restart.log
     assert status.log == "NAME STATUS\n"
+    assert logs.log == "log line\n"
 
 
 def test_catalog_git_source_uses_runner_for_clone_refs_and_checkout(tmp_path: Path):

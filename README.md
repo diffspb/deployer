@@ -39,7 +39,7 @@ Current implementation includes the deployer engine and the first service catalo
 - Optional healthcheck.
 - CLI suitable for later reuse by FastAPI UI.
 - Environment-aware prod/dev deployment.
-- Stop and status commands.
+- Stop, down, restart, status, and logs commands.
 - Service catalog with `git` and `local` sources.
 - Managed runtime layout under `/var/lib/deployer/services/<name>/`.
 - Environment variable storage and generated env files.
@@ -53,7 +53,12 @@ deployer env set myapp prod KEY=value --state-db /var/lib/deployer/state.db
 deployer deploy myapp --environment prod --ref main --state-db /var/lib/deployer/state.db
 deployer status myapp --environment prod --state-db /var/lib/deployer/state.db
 deployer stop myapp --environment prod --state-db /var/lib/deployer/state.db
+deployer down myapp --environment prod --state-db /var/lib/deployer/state.db
+deployer restart myapp --environment prod --state-db /var/lib/deployer/state.db
+deployer logs myapp --environment prod --tail 200 --state-db /var/lib/deployer/state.db
 ```
+
+`stop` keeps containers stopped. Use `down` when containers should be removed.
 
 See:
 

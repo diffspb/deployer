@@ -134,7 +134,7 @@ class DeploymentEngine:
                     env_file=env_file,
                 )
                 log_parts.append(f"Generated override: {override_path}")
-                command = compose_command(manifest, override_path, environment=environment, action="down")
+                command = compose_command(manifest, override_path, environment=environment, action="stop")
                 log_parts.append(f"Command: {' '.join(command)}")
                 if dry_run:
                     log_parts.append("Dry run: docker compose was not executed")
@@ -149,6 +149,44 @@ class DeploymentEngine:
                 log = "\n".join(part for part in log_parts if part)
                 self.state.finish_deployment(deployment_id, "failed", log)
                 return DeployResult(deployment_id, manifest.project_name, environment, "failed", log, override_path)
+
+    def down(
+        self,
+        project_dir: Path,
+        dry_run: bool = False,
+        manifest_path: Path | None = None,
+        environment: str = "prod",
+        override_dir: Path | None = None,
+        env_file: str | None = None,
+    ) -> DeployResult:
+        return self._deployment_action(
+            "down",
+            project_dir,
+            dry_run=dry_run,
+            manifest_path=manifest_path,
+            environment=environment,
+            override_dir=override_dir,
+            env_file=env_file,
+        )
+
+    def restart(
+        self,
+        project_dir: Path,
+        dry_run: bool = False,
+        manifest_path: Path | None = None,
+        environment: str = "prod",
+        override_dir: Path | None = None,
+        env_file: str | None = None,
+    ) -> DeployResult:
+        return self._deployment_action(
+            "restart",
+            project_dir,
+            dry_run=dry_run,
+            manifest_path=manifest_path,
+            environment=environment,
+            override_dir=override_dir,
+            env_file=env_file,
+        )
 
     def status(
         self,
@@ -174,12 +212,86 @@ class DeploymentEngine:
         except CommandError as exc:
             return CommandResult(manifest.project_name, environment, "failed", exc.output, override_path)
 
+    def logs(
+        self,
+        project_dir: Path,
+        manifest_path: Path | None = None,
+        environment: str = "prod",
+        override_dir: Path | None = None,
+        env_file: str | None = None,
+        tail: int = 200,
+    ) -> CommandResult:
+        project_dir = project_dir.resolve()
+        manifest = load_manifest(project_dir, manifest_path=manifest_path)
+        override_path = write_override(
+            project_dir,
+            manifest,
+            environment=environment,
+            output_dir=override_dir,
+            env_file=env_file,
+        )
+        command = compose_command(manifest, override_path, environment=environment, action="logs", tail=tail)
+        try:
+            result = self.runner.run(command, cwd=project_dir)
+            return CommandResult(manifest.project_name, environment, "success", result.output, override_path)
+        except CommandError as exc:
+            return CommandResult(manifest.project_name, environment, "failed", exc.output, override_path)
+
+    def _deployment_action(
+        self,
+        action: str,
+        project_dir: Path,
+        dry_run: bool = False,
+        manifest_path: Path | None = None,
+        environment: str = "prod",
+        override_dir: Path | None = None,
+        env_file: str | None = None,
+    ) -> DeployResult:
+        project_dir = project_dir.resolve()
+        manifest = load_manifest(project_dir, manifest_path=manifest_path)
+        deployment_id = self.state.create_deployment(
+            manifest.project_name,
+            environment,
+            action,
+            None,
+        )
+        log_parts: list[str] = []
+        override_path = (override_dir or project_dir / ".deployer") / f"{environment}.override.yml"
+
+        lock = _project_lock(manifest.project_name)
+        with lock:
+            try:
+                override_path = write_override(
+                    project_dir,
+                    manifest,
+                    environment=environment,
+                    output_dir=override_dir,
+                    env_file=env_file,
+                )
+                log_parts.append(f"Generated override: {override_path}")
+                command = compose_command(manifest, override_path, environment=environment, action=action)
+                log_parts.append(f"Command: {' '.join(command)}")
+                if dry_run:
+                    log_parts.append("Dry run: docker compose was not executed")
+                else:
+                    result = self.runner.run(command, cwd=project_dir)
+                    log_parts.append(result.output)
+                log = "\n".join(part for part in log_parts if part)
+                self.state.finish_deployment(deployment_id, "success", log)
+                return DeployResult(deployment_id, manifest.project_name, environment, "success", log, override_path)
+            except CommandError as exc:
+                log_parts.append(exc.output)
+                log = "\n".join(part for part in log_parts if part)
+                self.state.finish_deployment(deployment_id, "failed", log)
+                return DeployResult(deployment_id, manifest.project_name, environment, "failed", log, override_path)
+
 
 def compose_command(
     manifest: Manifest,
     override_path: Path,
     environment: str = "prod",
     action: str = "up",
+    tail: int = 200,
 ) -> list[str]:
     command = ["docker", "compose", "-p", manifest.project_name_for(environment)]
     for file in manifest.compose.files:
@@ -187,10 +299,16 @@ def compose_command(
     command.extend(["-f", str(override_path)])
     if action == "up":
         command.extend(["up", "-d", "--build"])
+    elif action == "stop":
+        command.append("stop")
     elif action == "down":
         command.append("down")
+    elif action == "restart":
+        command.append("restart")
     elif action == "ps":
         command.append("ps")
+    elif action == "logs":
+        command.extend(["logs", "--tail", str(tail)])
     else:
         raise ValueError(f"Unknown compose action: {action}")
     return command

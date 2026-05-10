@@ -47,7 +47,10 @@ deployer env unset myapp prod KEY
 deployer env render myapp prod
 deployer deploy myapp --environment prod --ref main --state-db /var/lib/deployer/state.db
 deployer stop myapp --environment prod --state-db /var/lib/deployer/state.db
+deployer down myapp --environment prod --state-db /var/lib/deployer/state.db
+deployer restart myapp --environment prod --state-db /var/lib/deployer/state.db
 deployer status myapp --environment prod --state-db /var/lib/deployer/state.db
+deployer logs myapp --environment prod --tail 200 --state-db /var/lib/deployer/state.db
 ```
 
 Path mode remains available for development and direct debugging:
@@ -57,9 +60,21 @@ deployer validate /path/to/project
 deployer render-override /path/to/project
 deployer deploy /path/to/project --state-db /var/lib/deployer/state.db
 deployer stop /path/to/project --state-db /var/lib/deployer/state.db
+deployer down /path/to/project --state-db /var/lib/deployer/state.db
+deployer restart /path/to/project --state-db /var/lib/deployer/state.db
 deployer status /path/to/project --state-db /var/lib/deployer/state.db
+deployer logs /path/to/project --state-db /var/lib/deployer/state.db
 deployer history --state-db /var/lib/deployer/state.db tasktrack
 ```
+
+Runtime command semantics:
+
+- `deploy` runs `docker compose up -d --build`.
+- `stop` runs `docker compose stop` and keeps containers.
+- `down` runs `docker compose down` and removes containers, but not images or named volumes.
+- `restart` runs `docker compose restart`.
+- `status` runs `docker compose ps`.
+- `logs` runs `docker compose logs --tail <n>`.
 
 ## Deployment Flow
 

@@ -76,6 +76,36 @@ def main(argv: list[str] | None = None) -> int:
                 result = catalog.stop(args.target, engine, environment=args.environment, dry_run=args.dry_run)
             print(result.log)
             return 0 if result.status == "success" else 1
+        if args.command == "down":
+            state = StateStore(args.state_db)
+            engine = DeploymentEngine(state)
+            if _is_path_target(args.target):
+                result = engine.down(
+                    Path(args.target),
+                    dry_run=args.dry_run,
+                    manifest_path=args.manifest,
+                    environment=args.environment,
+                )
+            else:
+                catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+                result = catalog.down(args.target, engine, environment=args.environment, dry_run=args.dry_run)
+            print(result.log)
+            return 0 if result.status == "success" else 1
+        if args.command == "restart":
+            state = StateStore(args.state_db)
+            engine = DeploymentEngine(state)
+            if _is_path_target(args.target):
+                result = engine.restart(
+                    Path(args.target),
+                    dry_run=args.dry_run,
+                    manifest_path=args.manifest,
+                    environment=args.environment,
+                )
+            else:
+                catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+                result = catalog.restart(args.target, engine, environment=args.environment, dry_run=args.dry_run)
+            print(result.log)
+            return 0 if result.status == "success" else 1
         if args.command == "status":
             state = StateStore(args.state_db)
             engine = DeploymentEngine(state)
@@ -88,6 +118,21 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
                 result = catalog.status(args.target, engine, environment=args.environment)
+            print(result.log, end="" if result.log.endswith("\n") else "\n")
+            return 0 if result.status == "success" else 1
+        if args.command == "logs":
+            state = StateStore(args.state_db)
+            engine = DeploymentEngine(state)
+            if _is_path_target(args.target):
+                result = engine.logs(
+                    Path(args.target),
+                    manifest_path=args.manifest,
+                    environment=args.environment,
+                    tail=args.tail,
+                )
+            else:
+                catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+                result = catalog.logs(args.target, engine, environment=args.environment, tail=args.tail)
             print(result.log, end="" if result.log.endswith("\n") else "\n")
             return 0 if result.status == "success" else 1
         if args.command == "history":
@@ -194,12 +239,36 @@ def _parser() -> argparse.ArgumentParser:
     stop.add_argument("--environment", choices=["prod", "dev"], default="prod")
     stop.add_argument("--dry-run", action="store_true")
 
+    down = subparsers.add_parser("down")
+    down.add_argument("target")
+    down.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
+    down.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    down.add_argument("--manifest", type=Path)
+    down.add_argument("--environment", choices=["prod", "dev"], default="prod")
+    down.add_argument("--dry-run", action="store_true")
+
+    restart = subparsers.add_parser("restart")
+    restart.add_argument("target")
+    restart.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
+    restart.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    restart.add_argument("--manifest", type=Path)
+    restart.add_argument("--environment", choices=["prod", "dev"], default="prod")
+    restart.add_argument("--dry-run", action="store_true")
+
     status = subparsers.add_parser("status")
     status.add_argument("target")
     status.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
     status.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
     status.add_argument("--manifest", type=Path)
     status.add_argument("--environment", choices=["prod", "dev"], default="prod")
+
+    logs = subparsers.add_parser("logs")
+    logs.add_argument("target")
+    logs.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
+    logs.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    logs.add_argument("--manifest", type=Path)
+    logs.add_argument("--environment", choices=["prod", "dev"], default="prod")
+    logs.add_argument("--tail", type=int, default=200)
 
     history = subparsers.add_parser("history")
     history.add_argument("project")
