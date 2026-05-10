@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from deployer.api import create_app
+from deployer.api import _refs_payload, _status_summary_payload, create_app
 from deployer.config import DeployerConfig
 
 
@@ -80,6 +80,7 @@ def test_api_service_local_env_deploy_history_and_delete(tmp_path: Path):
 
     jobs = client.get("/api/jobs?service=myapp&environment=prod").json()
     assert jobs["jobs"][0]["id"] == job_id
+    assert "Dry run" in jobs["jobs"][0]["log"]
 
     history = client.get("/api/services/myapp/history?environment=prod").json()
     assert history["environments"][0]["current_ref"] == "main"
@@ -116,3 +117,23 @@ def test_api_validation_and_catalog_errors(tmp_path: Path):
 
     response = client.delete("/api/services/unknown")
     assert response.status_code == 404
+
+
+def test_api_parses_refs_payload():
+    payload = _refs_payload("abc refs/heads/main\ndef refs/tags/v1\n")
+
+    assert payload == [
+        {"name": "main", "full_name": "refs/heads/main", "type": "branch", "commit": "abc"},
+        {"name": "v1", "full_name": "refs/tags/v1", "type": "tag", "commit": "def"},
+    ]
+
+
+def test_api_parses_status_summary_payload():
+    summary = _status_summary_payload(
+        '[{"Name":"myapp","Service":"app","State":"running","Health":"healthy"}]'
+    )
+
+    assert summary["running"] is True
+    assert summary["healthy"] is True
+    assert summary["health"] == "healthy"
+    assert summary["containers"][0]["state"] == "running"

@@ -9,6 +9,7 @@ const state = {
   deployModal: null,
   logsDrawer: null,
   historyDrawer: null,
+  jobDrawer: null,
   actionMenu: null,
   expandedServices: {},
   jobsFilter: {
@@ -161,14 +162,12 @@ function jobBadge(status, action = "") {
 }
 
 function parseRuntimeStatus(serviceName, environment, response) {
-  const text = String(response?.log || "");
-  const lower = text.toLowerCase();
-  const running = /\brunning\b/.test(lower);
-  const stopped = /\b(exited|stopped|dead|created|removing)\b/.test(lower);
-  let health = "unknown";
-  if (lower.includes("unhealthy")) health = "unhealthy";
-  else if (lower.includes("healthy")) health = "healthy";
-  else if (lower.includes("starting")) health = "starting";
+  const summary = response?.summary || {};
+  const raw = String(response?.log || "");
+  const running = Boolean(summary.running);
+  const states = Array.isArray(summary.containers) ? summary.containers.map((item) => item.state) : [];
+  const stopped = states.some((value) => ["exited", "stopped", "dead", "created", "removing"].includes(value));
+  const health = summary.health || "unknown";
   return {
     service: serviceName,
     environment,
@@ -177,7 +176,7 @@ function parseRuntimeStatus(serviceName, environment, response) {
     running,
     state: running ? "running" : stopped ? "stopped" : "unknown",
     health,
-    raw: text,
+    raw,
   };
 }
 
@@ -317,6 +316,7 @@ function render() {
       </main>
       ${state.logsDrawer ? renderLogsDrawer() : ""}
       ${state.historyDrawer ? renderHistoryDrawer() : ""}
+      ${state.jobDrawer ? renderJobDrawer() : ""}
       ${state.addOpen ? renderAddPanel() : ""}
       ${state.deployModal ? renderDeployModal() : ""}
       ${state.toast ? `<div class="toast">${escapeHtml(state.toast)}</div>` : ""}
@@ -680,6 +680,7 @@ function renderJobsView() {
         <div>Target</div>
         <div>Ref</div>
         <div>Finished</div>
+        <div></div>
       </div>
       ${filtered.length ? filtered.map(renderGlobalJobRow).join("") : `<div class="table-empty muted">No jobs match the current filters.</div>`}
     </div>
@@ -695,7 +696,41 @@ function renderGlobalJobRow(job) {
       <div class="mono">${escapeHtml(job.environment)}</div>
       <div class="mono">${escapeHtml(job.ref || job.version || "-")}</div>
       <div class="subtle">${escapeHtml(formatTime(job.finished_at || job.started_at || job.created_at))}</div>
+      <div><button class="btn ghost" onclick="openJobDrawer(${job.id})">Output</button></div>
     </div>
+  `;
+}
+
+function renderJobDrawer() {
+  const job = state.jobDrawer;
+  return `
+    <div class="overlay-backdrop" onclick="closeJobDrawer()"></div>
+    <aside class="drawer drawer-wide">
+      <div class="drawer-header">
+        <div class="row">
+          <div>
+            <div class="drawer-title">Job #${escapeHtml(job.id)}</div>
+            <div class="muted">${escapeHtml(job.service)}/${escapeHtml(job.environment)} · ${escapeHtml(job.action)}</div>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn secondary" onclick="reloadJobDrawer()">Reload</button>
+          <button class="btn ghost" onclick="closeJobDrawer()">${icon("close")}</button>
+        </div>
+      </div>
+      <div class="drawer-body">
+        <div class="section">
+          <div class="row wrap">
+            ${jobBadge(job.status)}
+            <span class="badge mono">${escapeHtml(job.ref || job.version || "-")}</span>
+            ${job.deployment_id ? `<span class="badge mono">deploy #${escapeHtml(job.deployment_id)}</span>` : ""}
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">CLI Output</div>
+          <pre class="log-box">${escapeHtml(job.log || "No job output yet.")}</pre>
+        </div>
+      </div>
+    </aside>
   `;
 }
 
@@ -940,6 +975,25 @@ function closeAddService() {
 function setAddSourceType(sourceType) {
   state.addSourceType = sourceType;
   render();
+}
+
+async function openJobDrawer(jobId) {
+  try {
+    state.jobDrawer = await api(`/api/jobs/${jobId}`);
+    render();
+  } catch (error) {
+    setToast(error.message);
+  }
+}
+
+function closeJobDrawer() {
+  state.jobDrawer = null;
+  render();
+}
+
+async function reloadJobDrawer() {
+  if (!state.jobDrawer) return;
+  await openJobDrawer(state.jobDrawer.id);
 }
 
 async function openLogsDrawer(service, environment) {

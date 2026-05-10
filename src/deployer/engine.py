@@ -306,7 +306,7 @@ def compose_command(
     elif action == "restart":
         command.append("restart")
     elif action == "ps":
-        command.append("ps")
+        command.extend(["ps", "--format", "json"])
     elif action == "logs":
         command.extend(["logs", "--tail", str(tail)])
     else:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -94,7 +95,8 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
 
     @app.get("/api/services/{name}/refs")
     def refs(name: str, catalog: CatalogDep) -> dict:
-        return {"service": name, "refs": catalog.refs(name)}
+        raw = catalog.refs(name)
+        return {"service": name, "refs": _refs_payload(raw), "raw_refs": raw}
 
     @app.get("/api/services/{name}/env/{environment}")
     def get_env(name: str, environment: str, catalog: CatalogDep) -> dict:
@@ -280,6 +282,86 @@ def _command_result_payload(result) -> dict:
         "status": result.status,
         "log": result.log,
         "override_path": str(result.override_path),
+        "summary": _status_summary_payload(result.log) if result.status == "success" else None,
+    }
+
+
+def _refs_payload(raw: str) -> list[dict]:
+    refs = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        commit_hash, name = parts[0], parts[-1]
+        if name.startswith("refs/heads/"):
+            ref_type = "branch"
+            short_name = name.removeprefix("refs/heads/")
+        elif name.startswith("refs/tags/"):
+            ref_type = "tag"
+            short_name = name.removeprefix("refs/tags/")
+        else:
+            ref_type = "ref"
+            short_name = name
+        refs.append({"name": short_name, "full_name": name, "type": ref_type, "commit": commit_hash})
+    return refs
+
+
+def _status_summary_payload(raw: str) -> dict:
+    try:
+        items = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return {
+            "containers": [],
+            "running": False,
+            "healthy": False,
+            "health": "unknown",
+        }
+    if not isinstance(items, list):
+        return {
+            "containers": [],
+            "running": False,
+            "healthy": False,
+            "health": "unknown",
+        }
+
+    containers = []
+    any_running = False
+    health_states: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        state = str(item.get("State") or item.get("Status") or "unknown").lower()
+        health = str(item.get("Health") or "unknown").lower()
+        if state == "running":
+            any_running = True
+        if health and health != "unknown":
+            health_states.append(health)
+        containers.append(
+            {
+                "name": item.get("Name"),
+                "service": item.get("Service"),
+                "state": state,
+                "health": health,
+            }
+        )
+
+    overall_health = "unknown"
+    if health_states:
+        if any(value == "unhealthy" for value in health_states):
+            overall_health = "unhealthy"
+        elif any(value == "starting" for value in health_states):
+            overall_health = "starting"
+        elif all(value == "healthy" for value in health_states):
+            overall_health = "healthy"
+
+    return {
+        "containers": containers,
+        "running": any_running,
+        "healthy": overall_health == "healthy",
+        "health": overall_health,
     }
 
 

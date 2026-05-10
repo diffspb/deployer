@@ -45,7 +45,7 @@ def test_compose_command_includes_all_files():
     assert restart_command[-1] == "restart"
 
     ps_command = compose_command(manifest, Path(".deployer/docker-compose.override.yml"), action="ps")
-    assert ps_command[-1] == "ps"
+    assert ps_command[-3:] == ["ps", "--format", "json"]
 
     logs_command = compose_command(manifest, Path(".deployer/docker-compose.override.yml"), action="logs", tail=50)
     assert logs_command[-3:] == ["logs", "--tail", "50"]
@@ -175,15 +175,15 @@ routes:
         def run(self, args, cwd):
             from deployer.runner import CommandResult
 
-            assert args[-1] == "ps"
-            return CommandResult(tuple(args), 0, "NAME STATUS\n")
+            assert args[-3:] == ["ps", "--format", "json"]
+            return CommandResult(tuple(args), 0, '[{"Name":"myapp","Service":"app","State":"running","Health":"healthy"}]\n')
 
     engine = DeploymentEngine(StateStore(tmp_path / "state.db"), runner=StatusRunner())
 
     result = engine.status(tmp_path)
 
     assert result.status == "success"
-    assert result.log == "NAME STATUS\n"
+    assert '"State":"running"' in result.log
 
 
 def test_logs_returns_runner_output(tmp_path: Path):

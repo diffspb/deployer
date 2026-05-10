@@ -84,8 +84,8 @@ def test_catalog_runtime_commands_local_service(tmp_path: Path):
 
     class Runner:
         def run(self, args, cwd):
-            if args[-1] == "ps":
-                return CommandResult(tuple(args), 0, "NAME STATUS\n")
+            if args[-3:] == ["ps", "--format", "json"]:
+                return CommandResult(tuple(args), 0, '[{"Name":"myapp","Service":"app","State":"running","Health":"healthy"}]\n')
             if args[-3:] == ["logs", "--tail", "25"]:
                 return CommandResult(tuple(args), 0, "log line\n")
             if args[-1] == "down":
@@ -108,7 +108,7 @@ def test_catalog_runtime_commands_local_service(tmp_path: Path):
     assert "removed" in down.log
     assert restart.status == "success"
     assert "restarted" in restart.log
-    assert status.log == "NAME STATUS\n"
+    assert '"Health":"healthy"' in status.log
     assert logs.log == "log line\n"
 
 

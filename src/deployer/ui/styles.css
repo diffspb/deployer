@@ -507,7 +507,7 @@ button:disabled {
 
 .jobs-table-head,
 .jobs-table-row {
-  grid-template-columns: 1.1fr 96px 132px 72px 1fr 170px;
+  grid-template-columns: 1.05fr 96px 132px 72px 1fr 170px 92px;
 }
 
 .env-table-head,
