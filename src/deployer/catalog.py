@@ -354,17 +354,21 @@ class ServiceCatalog:
             raise CatalogError(f"Service already exists: {name}")
 
     def _checkout_ref(self, repo_dir: Path, ref: str) -> None:
-        try:
+        remote_ref = f"origin/{ref}"
+        if self._has_ref(repo_dir, f"refs/remotes/{remote_ref}"):
+            self.runner.run(["git", "checkout", "-B", ref, "--track", remote_ref], cwd=repo_dir)
+            return
+        if self._has_ref(repo_dir, f"refs/heads/{ref}"):
             self.runner.run(["git", "checkout", ref], cwd=repo_dir)
             return
-        except CommandError as exc:
-            remote_ref = f"origin/{ref}"
-            try:
-                self.runner.run(["git", "show-ref", "--verify", f"refs/remotes/{remote_ref}"], cwd=repo_dir)
-                self.runner.run(["git", "checkout", "-B", ref, "--track", remote_ref], cwd=repo_dir)
-                return
-            except CommandError:
-                raise exc
+        self.runner.run(["git", "checkout", "--detach", ref], cwd=repo_dir)
+
+    def _has_ref(self, repo_dir: Path, ref: str) -> bool:
+        try:
+            self.runner.run(["git", "show-ref", "--verify", ref], cwd=repo_dir)
+            return True
+        except CommandError:
+            return False
 
 
 def render_env(env_vars: dict[str, str]) -> str:

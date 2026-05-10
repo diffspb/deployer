@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from deployer.catalog import CatalogError, ServiceCatalog, render_env
+from deployer.errors import CommandError
 from deployer.engine import DeploymentEngine
 from deployer.runner import CommandResult
 from deployer.state import StateStore
@@ -126,10 +127,16 @@ def test_catalog_git_source_uses_runner_for_clone_refs_and_checkout(tmp_path: Pa
                 return CommandResult(tuple(args), 0, "cloned\n")
             if args[:2] == ["git", "ls-remote"]:
                 return CommandResult(tuple(args), 0, "abc\trefs/heads/main\n")
+            if args[:3] == ["git", "show-ref", "--verify"]:
+                if args[3] == "refs/remotes/origin/main":
+                    return CommandResult(tuple(args), 0, "abc refs/remotes/origin/main\n")
+                raise CommandError("missing ref", 1, "")
             if args[:3] == ["git", "branch", "--show-current"]:
                 return CommandResult(tuple(args), 0, "main\n")
             if args[:2] == ["git", "rev-parse"]:
                 return CommandResult(tuple(args), 0, "abc123\n")
+            if args[:4] == ["git", "checkout", "-B", "main"]:
+                return CommandResult(tuple(args), 0, "reset branch\n")
             return CommandResult(tuple(args), 0, "")
 
     runner = GitRunner()
@@ -153,6 +160,44 @@ def test_catalog_git_source_uses_runner_for_clone_refs_and_checkout(tmp_path: Pa
     assert "git rev-parse HEAD -> abc123" in result.log
     assert state.require_environment("myapp", "prod").current_commit == "abc123"
     assert ("git", "fetch", "--all", "--tags") in runner.commands
+    assert ("git", "checkout", "-B", "main", "--track", "origin/main") in runner.commands
+
+
+def test_catalog_checkout_prefers_remote_branch_head_when_local_branch_is_stale(tmp_path: Path):
+    class GitRunner:
+        def __init__(self):
+            self.commands = []
+
+        def run(self, args, cwd):
+            self.commands.append(tuple(args))
+            if args[:2] == ["git", "clone"]:
+                repo = Path(args[3])
+                _project(repo)
+                (repo / ".git").mkdir()
+                return CommandResult(tuple(args), 0, "cloned\n")
+            if args[:3] == ["git", "show-ref", "--verify"]:
+                if args[3] == "refs/remotes/origin/dev":
+                    return CommandResult(tuple(args), 0, "be1f943 refs/remotes/origin/dev\n")
+                raise CommandError("missing ref", 1, "")
+            if args[:4] == ["git", "checkout", "-B", "dev"]:
+                return CommandResult(tuple(args), 0, "branch reset to origin/dev\n")
+            if args[:3] == ["git", "branch", "--show-current"]:
+                return CommandResult(tuple(args), 0, "dev\n")
+            if args[:2] == ["git", "rev-parse"]:
+                return CommandResult(tuple(args), 0, "be1f94315e20d335c276c6e2e9fb910bbc11344c\n")
+            return CommandResult(tuple(args), 0, "")
+
+    runner = GitRunner()
+    state = StateStore(tmp_path / "state.db")
+    catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime", runner=runner)
+    engine = DeploymentEngine(state)
+
+    catalog.add_git("myapp", "git@example.com/myapp.git", default_branch="main")
+    result = catalog.deploy("myapp", engine, environment="dev", ref="dev", dry_run=True)
+
+    assert result.status == "success"
+    assert ("git", "checkout", "-B", "dev", "--track", "origin/dev") in runner.commands
+    assert state.require_environment("myapp", "dev").current_commit == "be1f94315e20d335c276c6e2e9fb910bbc11344c"
 
 
 def test_catalog_rejects_duplicate_service_with_clear_error(tmp_path: Path):
