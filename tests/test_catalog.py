@@ -122,9 +122,12 @@ def test_catalog_git_source_uses_runner_for_clone_refs_and_checkout(tmp_path: Pa
             if args[:2] == ["git", "clone"]:
                 repo = Path(args[3])
                 _project(repo)
+                (repo / ".git").mkdir()
                 return CommandResult(tuple(args), 0, "cloned\n")
             if args[:2] == ["git", "ls-remote"]:
                 return CommandResult(tuple(args), 0, "abc\trefs/heads/main\n")
+            if args[:3] == ["git", "branch", "--show-current"]:
+                return CommandResult(tuple(args), 0, "main\n")
             if args[:2] == ["git", "rev-parse"]:
                 return CommandResult(tuple(args), 0, "abc123\n")
             return CommandResult(tuple(args), 0, "")
@@ -136,10 +139,14 @@ def test_catalog_git_source_uses_runner_for_clone_refs_and_checkout(tmp_path: Pa
 
     service = catalog.add_git("myapp", "git@example.com/myapp.git", default_branch="main")
     refs = catalog.refs("myapp")
+    status = catalog.source_status("myapp")
     result = catalog.deploy("myapp", engine, environment="prod", dry_run=True)
 
     assert service.source_type == "git"
     assert "refs/heads/main" in refs
+    assert status.available is True
+    assert status.current_ref == "main"
+    assert status.current_commit == "abc123"
     assert result.status == "success"
     assert state.require_environment("myapp", "prod").current_commit == "abc123"
     assert ("git", "fetch", "--all", "--tags") in runner.commands

@@ -74,6 +74,17 @@ function jobBadge(status) {
   return `<span class="badge ${cls}"><span class="dot"></span>${escapeHtml(status || "unknown")}</span>`;
 }
 
+function sourceBadge(service) {
+  const status = service.source_status;
+  if (!status) return `<span class="badge">${escapeHtml(service.source_type)}</span>`;
+  if (!status.available) return `<span class="badge failed"><span class="dot"></span>source failed</span>`;
+  return `<span class="badge success"><span class="dot"></span>${service.source_type === "git" ? "fetched" : "source ok"}</span>`;
+}
+
+function shortCommit(value) {
+  return value ? value.slice(0, 7) : "-";
+}
+
 function envSummary(service, name) {
   return service.environments?.find((env) => env.name === name) || {};
 }
@@ -207,8 +218,14 @@ function renderServiceCard(service) {
             <h2 class="service-name">${escapeHtml(service.name)}</h2>
             <div class="muted mono" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(service.source_url || service.source_path)}</div>
           </div>
-          ${job ? jobBadge(job.status) : `<span class="badge">${escapeHtml(service.source_type)}</span>`}
+          ${job ? jobBadge(job.status) : sourceBadge(service)}
         </div>
+        <div class="row" style="margin-top:12px;gap:6px;flex-wrap:wrap">
+          ${sourceBadge(service)}
+          ${service.source_status?.current_ref ? `<span class="badge">${escapeHtml(service.source_status.current_ref)}</span>` : ""}
+          ${service.source_status?.current_commit ? `<span class="badge mono">${escapeHtml(shortCommit(service.source_status.current_commit))}</span>` : ""}
+        </div>
+        ${service.source_status?.error ? `<div class="muted" style="margin-top:8px;color:var(--red)">${escapeHtml(service.source_status.error)}</div>` : ""}
         <div class="stats">
           <div class="stat"><div class="stat-value">${escapeHtml(prod.current_ref || "-")}</div><div class="stat-label">prod ref</div></div>
           <div class="stat"><div class="stat-value">${escapeHtml(dev.current_ref || "-")}</div><div class="stat-label">dev ref</div></div>
@@ -243,7 +260,7 @@ function renderPanel(service) {
           <div class="service-icon" style="background:${serviceColor(service.name)}">${escapeHtml(serviceInitials(service.name))}</div>
           <div>
             <div style="font-size:17px;font-weight:800">${escapeHtml(service.name)}</div>
-            <div class="muted mono" style="font-size:12px">${escapeHtml(service.source_type)} · ${escapeHtml(service.default_branch || "no default branch")}</div>
+            <div class="muted mono" style="font-size:12px">${escapeHtml(service.source_type)} · ${escapeHtml(service.default_branch || "no default branch")} · ${escapeHtml(shortCommit(service.source_status?.current_commit))}</div>
           </div>
           <div class="spacer"></div>
           <button class="btn ghost" onclick="closePanel()">${icon("close")}</button>
@@ -375,6 +392,11 @@ function renderSettingsTab(service) {
       <div class="field"><label>Source type</label><input class="input" value="${escapeHtml(service.source_type)}" disabled></div>
       <div class="field"><label>Source</label><input class="input mono" value="${escapeHtml(service.source_url || service.source_path)}" disabled></div>
       <div class="field"><label>Default branch</label><input class="input mono" value="${escapeHtml(service.default_branch || "")}" disabled></div>
+      <div class="field"><label>Local checkout</label><input class="input mono" value="${escapeHtml(service.source_path)}" disabled></div>
+      <div class="field"><label>Source status</label><input class="input" value="${escapeHtml(service.source_status?.available ? "available" : "failed")}" disabled></div>
+      <div class="field"><label>Current ref</label><input class="input mono" value="${escapeHtml(service.source_status?.current_ref || "")}" disabled></div>
+      <div class="field"><label>Current commit</label><input class="input mono" value="${escapeHtml(service.source_status?.current_commit || "")}" disabled></div>
+      ${service.source_status?.error ? `<div class="field"><label>Source error</label><textarea class="textarea mono" disabled>${escapeHtml(service.source_status.error)}</textarea></div>` : ""}
     </div>
     <div class="section">
       <div class="section-title">Danger zone</div>

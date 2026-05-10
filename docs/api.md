@@ -65,6 +65,23 @@ Local source:
 }
 ```
 
+Service detail includes source checkout status:
+
+```json
+{
+  "name": "myapp",
+  "source_type": "git",
+  "source_status": {
+    "available": true,
+    "path_exists": true,
+    "is_git_repo": true,
+    "current_ref": "master",
+    "current_commit": "56028edb9e996064f2083445e97597ddf7c4d56b",
+    "error": null
+  }
+}
+```
+
 ## Runtime Actions
 
 Runtime-changing actions are asynchronous from the API contract point of view. The API creates a job, starts the

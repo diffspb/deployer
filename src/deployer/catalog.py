@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from deployer.engine import CommandResult, DeployResult, DeploymentEngine
-from deployer.errors import DeployerError
+from deployer.errors import CommandError, DeployerError
 from deployer.manifest import load_manifest
 from deployer.runner import CommandRunner
 from deployer.state import DeploymentRecord, EnvironmentRecord, ServiceRecord, StateStore
@@ -35,6 +35,16 @@ class ServiceHistory:
     service: ServiceRecord
     environments: tuple[EnvironmentRecord, ...]
     records: tuple[DeploymentRecord, ...]
+
+
+@dataclass(frozen=True)
+class SourceStatus:
+    available: bool
+    path_exists: bool
+    is_git_repo: bool
+    current_ref: str | None
+    current_commit: str | None
+    error: str | None = None
 
 
 class CatalogError(DeployerError):
@@ -121,6 +131,31 @@ class ServiceCatalog:
         else:
             result = self.runner.run(["git", "show-ref", "--heads", "--tags"], cwd=Path(service.source_path))
         return result.output
+
+    def source_status(self, name: str) -> SourceStatus:
+        service = self.get_service(name)
+        source_path = Path(service.source_path)
+        path_exists = source_path.exists()
+        is_git_repo = _is_git_repo(source_path)
+        current_ref = None
+        current_commit = None
+        error = None
+
+        if service.source_type == "git" and not path_exists:
+            return SourceStatus(False, False, False, None, None, f"Repository is missing: {source_path}")
+        if service.source_type == "git" and not is_git_repo:
+            return SourceStatus(False, path_exists, False, None, None, f"Repository is not a git checkout: {source_path}")
+        if not path_exists:
+            return SourceStatus(False, False, False, None, None, f"Source path is missing: {source_path}")
+
+        if is_git_repo:
+            try:
+                current_ref = self.runner.run(["git", "branch", "--show-current"], cwd=source_path).output.strip() or None
+                current_commit = self.runner.run(["git", "rev-parse", "HEAD"], cwd=source_path).output.strip() or None
+            except CommandError as exc:
+                error = exc.output.strip() or str(exc)
+
+        return SourceStatus(error is None, path_exists, is_git_repo, current_ref, current_commit, error)
 
     def set_env(self, service_name: str, environment: str, key: str, value: str) -> EnvironmentRecord:
         _validate_environment(environment)

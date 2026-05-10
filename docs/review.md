@@ -245,3 +245,30 @@ Remaining risks:
 
 - Local source paths must exist inside the deployer container. For production use, prefer git-backed services or mount explicit host project directories.
 - Docker Compose integration is still manually verified on the VPS; an automated gated integration target is still pending.
+
+## Source Status Review
+
+Date: 2026-05-10
+
+Commands run:
+
+```bash
+node --check src/deployer/ui/app.js
+.venv/bin/python -m pytest --cov=deployer --cov-report=term-missing
+```
+
+Results:
+
+- 41 tests passed.
+- Coverage: 86.25%.
+- Coverage threshold: 80%.
+
+Implemented behavior:
+
+- Service detail API now reports source checkout availability, local path existence, git checkout detection, current branch, current commit, and source error.
+- UI service cards and settings panel show whether source was fetched successfully and which commit is currently checked out.
+
+Remaining risks:
+
+- Source status is read-only; there is still no explicit UI action for `fetch latest` separate from deploy.
+- `refs` output is still raw text; UI should parse it into branch/tag choices.

@@ -232,10 +232,22 @@ def _service_detail(catalog: ServiceCatalog, name: str) -> dict:
     service = catalog.get_service(name)
     return {
         **_service_payload(service),
+        "source_status": _source_status_payload(catalog.source_status(service.name)),
         "environments": [
             _environment_payload(catalog.get_environment(service.name, "prod")),
             _environment_payload(catalog.get_environment(service.name, "dev")),
         ],
+    }
+
+
+def _source_status_payload(status) -> dict:
+    return {
+        "available": status.available,
+        "path_exists": status.path_exists,
+        "is_git_repo": status.is_git_repo,
+        "current_ref": status.current_ref,
+        "current_commit": status.current_commit,
+        "error": status.error,
     }
 
 
