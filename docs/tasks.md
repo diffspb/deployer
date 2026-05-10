@@ -31,7 +31,7 @@
 - [x] Add `status` command
 - [x] Add `logs` command
 - [ ] Move default state DB to `/var/lib/deployer/state.db` in packaged service usage
-- [ ] Run CLI from inside the deployer container through Docker socket proxy
+- [x] Run CLI from inside the deployer container through Docker socket proxy
 
 ## Service Catalog v1
 

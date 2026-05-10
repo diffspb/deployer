@@ -230,3 +230,18 @@ Remaining risks:
 - Deploy ref selection currently uses a browser prompt, not a structured branch/tag picker.
 - Runtime logs are fetched as command output snapshots, not streamed.
 - There is no end-to-end browser test yet; coverage verifies that the shell and static assets are served.
+
+## Packaged Runtime Review
+
+Date: 2026-05-10
+
+Implemented behavior:
+
+- Deployer Docker image now includes `git`.
+- Deployer Docker image now includes Docker CLI and the Compose plugin copied from the official Docker CLI image.
+- Runtime commands can execute through `DOCKER_HOST=tcp://docker-socket-proxy:2375` from inside the deployer container.
+
+Remaining risks:
+
+- Local source paths must exist inside the deployer container. For production use, prefer git-backed services or mount explicit host project directories.
+- Docker Compose integration is still manually verified on the VPS; an automated gated integration target is still pending.
