@@ -39,6 +39,10 @@ class EnvironmentRecord:
     name: str
     subdomain: str
     url_prefix: str
+    deploy_mode: str
+    deploy_source: str | None
+    deploy_pattern: str | None
+    deploy_pattern_type: str | None
     env_vars: dict[str, str]
     current_version: str | None
     current_ref: str | None
@@ -209,8 +213,12 @@ class StateStore:
             for environment in ("prod", "dev"):
                 conn.execute(
                     """
-                    INSERT INTO environments(service_id, name, subdomain, url_prefix, env_vars_json, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, '{}', ?, ?)
+                    INSERT INTO environments(
+                        service_id, name, subdomain, url_prefix,
+                        deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
+                        env_vars_json, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, 'manual', NULL, NULL, NULL, '{}', ?, ?)
                     """,
                     (service_id, environment, name, _default_url_prefix(environment), now, now),
                 )
@@ -254,7 +262,9 @@ class StateStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT e.id, e.service_id, e.name, e.subdomain, e.url_prefix, e.env_vars_json,
+                SELECT e.id, e.service_id, e.name, e.subdomain, e.url_prefix,
+                       e.deploy_mode, e.deploy_source, e.deploy_pattern, e.deploy_pattern_type,
+                       e.env_vars_json,
                        e.current_version, e.current_ref, e.current_commit,
                        e.last_deployment_id, e.created_at, e.updated_at
                 FROM environments e
@@ -268,16 +278,40 @@ class StateStore:
             ).fetchall()
         return [_environment_record(row) for row in rows]
 
-    def add_environment(self, service_name: str, environment: str, url_prefix: str | None = None) -> EnvironmentRecord:
+    def add_environment(
+        self,
+        service_name: str,
+        environment: str,
+        url_prefix: str | None = None,
+        deploy_mode: str = "manual",
+        deploy_source: str | None = None,
+        deploy_pattern: str | None = None,
+        deploy_pattern_type: str | None = None,
+    ) -> EnvironmentRecord:
         service = self.require_service(service_name)
         now = _now()
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO environments(service_id, name, subdomain, url_prefix, env_vars_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, '{}', ?, ?)
+                INSERT INTO environments(
+                    service_id, name, subdomain, url_prefix,
+                    deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
+                    env_vars_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
                 """,
-                (service.id, environment, service.name, _default_url_prefix(environment) if url_prefix is None else url_prefix, now, now),
+                (
+                    service.id,
+                    environment,
+                    service.name,
+                    _default_url_prefix(environment) if url_prefix is None else url_prefix,
+                    deploy_mode,
+                    deploy_source,
+                    deploy_pattern,
+                    deploy_pattern_type,
+                    now,
+                    now,
+                ),
             )
         return self.require_environment(service_name, environment)
 
@@ -286,18 +320,36 @@ class StateStore:
         service_name: str,
         environment: str,
         url_prefix: str | None = None,
+        deploy_mode: str | None = None,
+        deploy_source: str | None = None,
+        deploy_pattern: str | None = None,
+        deploy_pattern_type: str | None = None,
     ) -> EnvironmentRecord:
         record = self.require_environment(service_name, environment)
-        if url_prefix is None:
-            return record
+        values = {
+            "url_prefix": record.url_prefix if url_prefix is None else url_prefix,
+            "deploy_mode": record.deploy_mode if deploy_mode is None else deploy_mode,
+            "deploy_source": record.deploy_source if deploy_source is None else deploy_source,
+            "deploy_pattern": record.deploy_pattern if deploy_pattern is None else deploy_pattern,
+            "deploy_pattern_type": record.deploy_pattern_type if deploy_pattern_type is None else deploy_pattern_type,
+        }
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE environments
-                SET url_prefix = ?, updated_at = ?
+                SET url_prefix = ?, deploy_mode = ?, deploy_source = ?,
+                    deploy_pattern = ?, deploy_pattern_type = ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (url_prefix, _now(), record.id),
+                (
+                    values["url_prefix"],
+                    values["deploy_mode"],
+                    values["deploy_source"],
+                    values["deploy_pattern"],
+                    values["deploy_pattern_type"],
+                    _now(),
+                    record.id,
+                ),
             )
         return self.require_environment(service_name, environment)
 
@@ -321,7 +373,9 @@ class StateStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT e.id, e.service_id, e.name, e.subdomain, e.url_prefix, e.env_vars_json,
+                SELECT e.id, e.service_id, e.name, e.subdomain, e.url_prefix,
+                       e.deploy_mode, e.deploy_source, e.deploy_pattern, e.deploy_pattern_type,
+                       e.env_vars_json,
                        e.current_version, e.current_ref, e.current_commit,
                        e.last_deployment_id, e.created_at, e.updated_at
                 FROM environments e
@@ -480,6 +534,10 @@ class StateStore:
                     name TEXT NOT NULL,
                     subdomain TEXT NOT NULL,
                     url_prefix TEXT,
+                    deploy_mode TEXT NOT NULL DEFAULT 'manual',
+                    deploy_source TEXT,
+                    deploy_pattern TEXT,
+                    deploy_pattern_type TEXT,
                     env_vars_json TEXT NOT NULL DEFAULT '{}',
                     current_version TEXT,
                     current_ref TEXT,
@@ -493,6 +551,10 @@ class StateStore:
                 """
             )
             _ensure_column(conn, "environments", "url_prefix", "TEXT")
+            _ensure_column(conn, "environments", "deploy_mode", "TEXT NOT NULL DEFAULT 'manual'")
+            _ensure_column(conn, "environments", "deploy_source", "TEXT")
+            _ensure_column(conn, "environments", "deploy_pattern", "TEXT")
+            _ensure_column(conn, "environments", "deploy_pattern_type", "TEXT")
             conn.execute(
                 """
                 UPDATE environments
@@ -552,13 +614,17 @@ def _environment_record(row) -> EnvironmentRecord:
         name=row[2],
         subdomain=row[3],
         url_prefix=row[4] or "",
-        env_vars=json.loads(row[5] or "{}"),
-        current_version=row[6],
-        current_ref=row[7],
-        current_commit=row[8],
-        last_deployment_id=row[9],
-        created_at=row[10],
-        updated_at=row[11],
+        deploy_mode=row[5] or "manual",
+        deploy_source=row[6],
+        deploy_pattern=row[7],
+        deploy_pattern_type=row[8],
+        env_vars=json.loads(row[9] or "{}"),
+        current_version=row[10],
+        current_ref=row[11],
+        current_commit=row[12],
+        last_deployment_id=row[13],
+        created_at=row[14],
+        updated_at=row[15],
     )
 
 

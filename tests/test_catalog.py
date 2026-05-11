@@ -78,17 +78,46 @@ def test_catalog_deploys_dynamic_runtime_target_with_url_prefix(tmp_path: Path):
     state = StateStore(tmp_path / "state.db")
     catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
     catalog.add_local("myapp", project)
-    catalog.add_environment("myapp", "stage", url_prefix="rc")
+    stage = catalog.add_environment(
+        "myapp",
+        "stage",
+        url_prefix="rc",
+        deploy_mode="webhook_auto",
+        deploy_source="tag",
+        deploy_pattern="^v.+-rc[0-9]+$",
+        deploy_pattern_type="regex",
+    )
     engine = DeploymentEngine(state)
 
     result = catalog.deploy("myapp", engine, environment="stage", ref="v1-rc1", dry_run=True)
 
+    assert stage.deploy_mode == "webhook_auto"
     assert result.status == "success"
     assert result.override_path == tmp_path / "runtime" / "services" / "myapp" / "overrides" / "stage.override.yml"
     assert "Host(`myapp.rc.busypage.ru`)" in result.override_path.read_text()
     env = state.require_environment("myapp", "stage")
     assert env.current_ref == "v1-rc1"
     assert env.last_deployment_id == result.deployment_id
+
+
+def test_catalog_validates_runtime_target_policy(tmp_path: Path):
+    project = _project(tmp_path / "project")
+    state = StateStore(tmp_path / "state.db")
+    catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
+    catalog.add_local("myapp", project)
+
+    with pytest.raises(CatalogError, match="Deploy source must be branch or tag"):
+        catalog.add_environment("myapp", "broken", deploy_mode="webhook_auto")
+
+    with pytest.raises(CatalogError, match="Invalid deploy pattern regex"):
+        catalog.add_environment(
+            "myapp",
+            "broken",
+            deploy_mode="webhook_auto",
+            deploy_source="branch",
+            deploy_pattern="[",
+            deploy_pattern_type="regex",
+        )
 
 
 def test_render_env_quotes_unsafe_values():

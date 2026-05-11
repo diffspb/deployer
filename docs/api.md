@@ -96,6 +96,10 @@ Service detail also includes all runtime targets currently stored for the servic
     {
       "name": "prod",
       "url_prefix": "",
+      "deploy_mode": "manual",
+      "deploy_source": null,
+      "deploy_pattern": null,
+      "deploy_pattern_type": null,
       "public_url": "https://myapp.busypage.ru/",
       "env": {},
       "current_ref": "main",
@@ -105,6 +109,10 @@ Service detail also includes all runtime targets currently stored for the servic
     {
       "name": "stage",
       "url_prefix": "rc",
+      "deploy_mode": "webhook_auto",
+      "deploy_source": "tag",
+      "deploy_pattern": "^v.+-rc[0-9]+$",
+      "deploy_pattern_type": "regex",
       "public_url": "https://myapp.rc.busypage.ru/",
       "env": {},
       "current_ref": "v1-rc1",
@@ -125,7 +133,11 @@ Create:
 ```json
 {
   "name": "stage",
-  "url_prefix": "rc"
+  "url_prefix": "rc",
+  "deploy_mode": "webhook_auto",
+  "deploy_source": "tag",
+  "deploy_pattern": "^v.+-rc[0-9]+$",
+  "deploy_pattern_type": "regex"
 }
 ```
 
@@ -133,7 +145,8 @@ Update:
 
 ```json
 {
-  "url_prefix": "stage"
+  "url_prefix": "stage",
+  "deploy_mode": "webhook_gated"
 }
 ```
 
@@ -141,6 +154,10 @@ Rules:
 
 - `name` must contain lowercase letters, digits, and dashes.
 - `url_prefix` may be empty for the base host or contain lowercase letters, digits, and dashes.
+- `deploy_mode` is `manual`, `webhook_auto`, or `webhook_gated`.
+- `deploy_source` is `branch` or `tag` for webhook targets.
+- `deploy_pattern_type` is `exact` or `regex` for webhook targets.
+- webhook targets must define `deploy_source`, `deploy_pattern`, and `deploy_pattern_type`.
 - Runtime actions, env vars, history, preview, status, and logs are always scoped to `service + environment`.
 
 ## Runtime Preview

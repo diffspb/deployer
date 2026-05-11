@@ -180,6 +180,7 @@ def _handle_services(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
             print(
                 f"environment: {env.name}\tsubdomain={env.subdomain}\t"
                 f"url_prefix={env.url_prefix or '-'}\t"
+                f"deploy_mode={env.deploy_mode}\t"
                 f"ref={env.current_ref or '-'}\tcommit={env.current_commit or '-'}"
             )
         return 0
@@ -193,15 +194,41 @@ def _handle_services(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
 def _handle_runtime_targets(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
     if args.runtime_targets_command == "list":
         for env in catalog.list_environments(args.service):
-            print(f"{env.name}\turl_prefix={env.url_prefix or '-'}\tref={env.current_ref or '-'}")
+            print(
+                f"{env.name}\turl_prefix={env.url_prefix or '-'}\t"
+                f"deploy_mode={env.deploy_mode}\t"
+                f"deploy_source={env.deploy_source or '-'}\t"
+                f"deploy_pattern={env.deploy_pattern or '-'}\t"
+                f"pattern_type={env.deploy_pattern_type or '-'}\t"
+                f"ref={env.current_ref or '-'}"
+            )
         return 0
     if args.runtime_targets_command == "add":
-        env = catalog.add_environment(args.service, args.name, url_prefix=args.url_prefix)
+        env = catalog.add_environment(
+            args.service,
+            args.name,
+            url_prefix=args.url_prefix,
+            deploy_mode=args.deploy_mode,
+            deploy_source=args.deploy_source,
+            deploy_pattern=args.deploy_pattern,
+            deploy_pattern_type=args.pattern_type,
+        )
         print(f"added\t{args.service}\t{env.name}\turl_prefix={env.url_prefix or '-'}")
         return 0
     if args.runtime_targets_command == "update":
-        env = catalog.update_environment(args.service, args.name, url_prefix=args.url_prefix)
-        print(f"updated\t{args.service}\t{env.name}\turl_prefix={env.url_prefix or '-'}")
+        env = catalog.update_environment(
+            args.service,
+            args.name,
+            url_prefix=args.url_prefix,
+            deploy_mode=args.deploy_mode,
+            deploy_source=args.deploy_source,
+            deploy_pattern=args.deploy_pattern,
+            deploy_pattern_type=args.pattern_type,
+        )
+        print(
+            f"updated\t{args.service}\t{env.name}\turl_prefix={env.url_prefix or '-'}\t"
+            f"deploy_mode={env.deploy_mode}"
+        )
         return 0
     if args.runtime_targets_command == "remove":
         removed = catalog.remove_environment(args.service, args.name)
@@ -370,12 +397,20 @@ def _parser() -> argparse.ArgumentParser:
     runtime_targets_add.add_argument("service")
     runtime_targets_add.add_argument("name")
     runtime_targets_add.add_argument("--url-prefix")
+    runtime_targets_add.add_argument("--deploy-mode", default="manual")
+    runtime_targets_add.add_argument("--deploy-source")
+    runtime_targets_add.add_argument("--deploy-pattern")
+    runtime_targets_add.add_argument("--pattern-type", dest="pattern_type")
 
     runtime_targets_update = runtime_targets_subparsers.add_parser("update")
     _add_catalog_options(runtime_targets_update)
     runtime_targets_update.add_argument("service")
     runtime_targets_update.add_argument("name")
     runtime_targets_update.add_argument("--url-prefix")
+    runtime_targets_update.add_argument("--deploy-mode")
+    runtime_targets_update.add_argument("--deploy-source")
+    runtime_targets_update.add_argument("--deploy-pattern")
+    runtime_targets_update.add_argument("--pattern-type", dest="pattern_type")
 
     runtime_targets_remove = runtime_targets_subparsers.add_parser("remove")
     _add_catalog_options(runtime_targets_remove)

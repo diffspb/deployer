@@ -139,6 +139,14 @@ function envSummary(service, environment) {
   return service.environments?.find((item) => item.name === environment) || {};
 }
 
+function deployPolicyLabel(env) {
+  if (!env?.deploy_mode || env.deploy_mode === "manual") return "manual";
+  const source = env.deploy_source || "-";
+  const pattern = env.deploy_pattern || "-";
+  const patternType = env.deploy_pattern_type || "-";
+  return `${env.deploy_mode} · ${source} · ${patternType} · ${pattern}`;
+}
+
 function serviceEnvironmentNames(service) {
   return (service.environments || []).map((environment) => environment.name);
 }
@@ -738,6 +746,7 @@ function renderServicePage() {
                 ${renderRuntimeStatus(service.name, environment)}
               </div>
               <div class="muted mono">${escapeHtml(runtimeUrl(service.name, environment) || "-")}</div>
+              <div class="muted mono top-gap">${escapeHtml(deployPolicyLabel(envSummary(service, environment)))}</div>
               <div class="mono top-gap">${escapeHtml(envSummary(service, environment).current_ref || "-")}</div>
             </button>
           `).join("")}
@@ -789,6 +798,10 @@ function renderRuntimePage() {
           <div class="fact">
             <span class="fact-label">Last deployment</span>
             <span class="fact-value mono">${escapeHtml(env.last_deployment_id ? `#${env.last_deployment_id}` : "-")}</span>
+          </div>
+          <div class="fact">
+            <span class="fact-label">Deploy policy</span>
+            <span class="fact-value mono">${escapeHtml(deployPolicyLabel(env))}</span>
           </div>
         </div>
         <div class="runtime-button-row">

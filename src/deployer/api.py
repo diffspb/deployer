@@ -42,10 +42,18 @@ class RuntimeRequest(BaseModel):
 class RuntimeTargetRequest(BaseModel):
     name: str
     url_prefix: str | None = None
+    deploy_mode: str = "manual"
+    deploy_source: str | None = None
+    deploy_pattern: str | None = None
+    deploy_pattern_type: str | None = None
 
 
 class RuntimeTargetUpdateRequest(BaseModel):
     url_prefix: str | None = None
+    deploy_mode: str | None = None
+    deploy_source: str | None = None
+    deploy_pattern: str | None = None
+    deploy_pattern_type: str | None = None
 
 
 class EnvSetRequest(BaseModel):
@@ -115,7 +123,15 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
 
     @app.post("/api/services/{name}/runtime-targets", status_code=201)
     def add_runtime_target(name: str, payload: RuntimeTargetRequest, catalog: CatalogDep) -> dict:
-        env = catalog.add_environment(name, payload.name, url_prefix=payload.url_prefix)
+        env = catalog.add_environment(
+            name,
+            payload.name,
+            url_prefix=payload.url_prefix,
+            deploy_mode=payload.deploy_mode,
+            deploy_source=payload.deploy_source,
+            deploy_pattern=payload.deploy_pattern,
+            deploy_pattern_type=payload.deploy_pattern_type,
+        )
         return {"service": name, "runtime_target": _environment_payload(env)}
 
     @app.patch("/api/services/{name}/runtime-targets/{environment}")
@@ -125,7 +141,15 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         payload: RuntimeTargetUpdateRequest,
         catalog: CatalogDep,
     ) -> dict:
-        env = catalog.update_environment(name, environment, url_prefix=payload.url_prefix)
+        env = catalog.update_environment(
+            name,
+            environment,
+            url_prefix=payload.url_prefix,
+            deploy_mode=payload.deploy_mode,
+            deploy_source=payload.deploy_source,
+            deploy_pattern=payload.deploy_pattern,
+            deploy_pattern_type=payload.deploy_pattern_type,
+        )
         return {"service": name, "runtime_target": _environment_payload(env)}
 
     @app.delete("/api/services/{name}/runtime-targets/{environment}")
@@ -264,6 +288,10 @@ def _environment_payload(env: EnvironmentRecord, public_url: str | None = None) 
         "name": env.name,
         "subdomain": env.subdomain,
         "url_prefix": env.url_prefix,
+        "deploy_mode": env.deploy_mode,
+        "deploy_source": env.deploy_source,
+        "deploy_pattern": env.deploy_pattern,
+        "deploy_pattern_type": env.deploy_pattern_type,
         "public_url": public_url,
         "env": env.env_vars,
         "current_version": env.current_version,

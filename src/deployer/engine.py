@@ -88,7 +88,7 @@ class DeploymentEngine:
                 else:
                     result = self.runner.run(command, cwd=project_dir)
                     log_parts.append(result.output)
-                    ok, message = self.health_checker(manifest, environment=environment, url_prefix=url_prefix)
+                    ok, message = self._check_health(manifest, environment, url_prefix)
                     log_parts.append(message)
                     if not ok:
                         raise RuntimeError(message)
@@ -298,6 +298,17 @@ class DeploymentEngine:
                 log = "\n".join(part for part in log_parts if part)
                 self.state.finish_deployment(deployment_id, "failed", log)
                 return DeployResult(deployment_id, manifest.project_name, environment, "failed", log, override_path)
+
+    def _check_health(
+        self,
+        manifest: Manifest,
+        environment: str,
+        url_prefix: str | None,
+    ) -> tuple[bool, str]:
+        try:
+            return self.health_checker(manifest, environment=environment, url_prefix=url_prefix)
+        except TypeError:
+            return self.health_checker(manifest, environment=environment)
 
 
 def compose_command(

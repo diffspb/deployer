@@ -108,6 +108,70 @@ def test_cli_service_catalog_local_workflow(tmp_path: Path, capsys):
     assert (
         main(
             [
+                "runtime-targets",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "add",
+                "myapp",
+                "stage",
+                "--url-prefix",
+                "rc",
+                "--deploy-mode",
+                "webhook_auto",
+                "--deploy-source",
+                "tag",
+                "--deploy-pattern",
+                "^v.+-rc[0-9]+$",
+                "--pattern-type",
+                "regex",
+            ]
+        )
+        == 0
+    )
+    assert "added\tmyapp\tstage" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "runtime-targets",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "list",
+                "myapp",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "stage" in output
+    assert "deploy_mode=webhook_auto" in output
+
+    assert (
+        main(
+            [
+                "runtime-targets",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "update",
+                "myapp",
+                "stage",
+                "--deploy-mode",
+                "webhook_gated",
+            ]
+        )
+        == 0
+    )
+    assert "deploy_mode=webhook_gated" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
                 "deploy",
                 "myapp",
                 "--state-db",
@@ -117,18 +181,21 @@ def test_cli_service_catalog_local_workflow(tmp_path: Path, capsys):
                 "--dry-run",
                 "--ref",
                 "main",
+                "--environment",
+                "stage",
             ]
         )
         == 0
     )
     output = capsys.readouterr().out
     assert "Dry run" in output
-    assert str(runtime_dir / "services" / "myapp" / "overrides" / "prod.override.yml") in output
+    assert str(runtime_dir / "services" / "myapp" / "overrides" / "stage.override.yml") in output
 
     assert main(["history", "myapp", "--state-db", str(state_db), "--runtime-dir", str(runtime_dir)]) == 0
     output = capsys.readouterr().out
     assert "service: myapp" in output
     assert "current: prod" in output
+    assert "current: stage" in output
     assert "ref=main" in output
 
     assert (

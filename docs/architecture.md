@@ -42,6 +42,10 @@ deployer services list
 deployer services show myapp
 deployer services remove myapp
 deployer refs myapp
+deployer runtime-targets list myapp
+deployer runtime-targets add myapp stage --url-prefix stage
+deployer runtime-targets update myapp dev --deploy-mode webhook_auto --deploy-source branch --deploy-pattern dev --pattern-type exact
+deployer runtime-targets remove myapp stage
 deployer env list myapp prod
 deployer env set myapp prod KEY=value
 deployer env unset myapp prod KEY
@@ -78,7 +82,7 @@ Runtime command semantics:
 - `status` runs `docker compose ps`.
 - `logs` runs `docker compose logs --tail <n>`.
 
-Catalog `history` prints current service environment metadata before deployment records:
+Catalog `history` prints current service runtime target metadata before deployment records:
 
 ```text
 service: myapp
@@ -92,7 +96,7 @@ current: prod	version=main	ref=main	commit=abc123	last_deployment=42
 Catalog mode:
 
 1. Resolve service by name from SQLite.
-2. Resolve environment config and render `/var/lib/deployer/services/<name>/env/<environment>.env`.
+2. Resolve runtime target config and render `/var/lib/deployer/services/<name>/env/<environment>.env`.
 3. For git sources, fetch tags/branches and checkout requested ref.
 4. Load `deployer.yml` from the managed repo or local source path.
 5. Render `/var/lib/deployer/services/<name>/overrides/<environment>.override.yml`.
@@ -111,9 +115,17 @@ Path mode:
 8. Mark deployment as `success` or `failed`.
 9. Persist command log.
 
-`prod` uses the base project name and `<subdomain>.<domain>`.
+Runtime targets are arbitrary per service. `prod` and `dev` are created as defaults for existing workflows, but
+operators can create additional targets such as `stage`, `preview-123`, or project-specific names.
 
-`dev` uses `<project>-dev` as Compose project name and `<subdomain>.dev.<domain>`.
+Routing uses per-target `url_prefix`:
+
+- empty prefix -> `<subdomain>.<domain>`
+- `dev` -> `<subdomain>.dev.<domain>`
+- `stage` -> `<subdomain>.stage.<domain>`
+
+Compose project names remain target-aware through `<project>-<target>` except for `prod`, which keeps the base
+project name for backward compatibility.
 
 ## Future FastAPI UI
 

@@ -18,6 +18,9 @@ _SERVICE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _TARGET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 _URL_PREFIX_RE = re.compile(r"^$|^[a-z0-9][a-z0-9-]{0,62}$")
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+DEPLOY_MODES = {"manual", "webhook_auto", "webhook_gated"}
+DEPLOY_SOURCES = {"branch", "tag"}
+DEPLOY_PATTERN_TYPES = {"exact", "regex"}
 
 
 @dataclass(frozen=True)
@@ -178,23 +181,66 @@ class ServiceCatalog:
         self.get_service(service_name)
         return self.state.list_environments(service_name)
 
-    def add_environment(self, service_name: str, environment: str, url_prefix: str | None = None) -> EnvironmentRecord:
+    def add_environment(
+        self,
+        service_name: str,
+        environment: str,
+        url_prefix: str | None = None,
+        deploy_mode: str = "manual",
+        deploy_source: str | None = None,
+        deploy_pattern: str | None = None,
+        deploy_pattern_type: str | None = None,
+    ) -> EnvironmentRecord:
         _validate_target_name(environment)
         if url_prefix is not None:
             _validate_url_prefix(url_prefix)
+        _validate_deploy_policy(deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type)
         try:
-            return self.state.add_environment(service_name, environment, url_prefix=url_prefix)
+            return self.state.add_environment(
+                service_name,
+                environment,
+                url_prefix=url_prefix,
+                deploy_mode=deploy_mode,
+                deploy_source=deploy_source,
+                deploy_pattern=deploy_pattern,
+                deploy_pattern_type=deploy_pattern_type,
+            )
         except KeyError as exc:
             raise CatalogError(f"Unknown service: {service_name}") from exc
         except sqlite3.IntegrityError as exc:
             raise CatalogError(f"Runtime target already exists: {service_name}/{environment}") from exc
 
-    def update_environment(self, service_name: str, environment: str, url_prefix: str | None = None) -> EnvironmentRecord:
+    def update_environment(
+        self,
+        service_name: str,
+        environment: str,
+        url_prefix: str | None = None,
+        deploy_mode: str | None = None,
+        deploy_source: str | None = None,
+        deploy_pattern: str | None = None,
+        deploy_pattern_type: str | None = None,
+    ) -> EnvironmentRecord:
         _validate_target_name(environment)
         if url_prefix is not None:
             _validate_url_prefix(url_prefix)
         try:
-            return self.state.update_environment(service_name, environment, url_prefix=url_prefix)
+            current = self.state.require_environment(service_name, environment)
+            next_policy = {
+                "deploy_mode": current.deploy_mode if deploy_mode is None else deploy_mode,
+                "deploy_source": current.deploy_source if deploy_source is None else deploy_source,
+                "deploy_pattern": current.deploy_pattern if deploy_pattern is None else deploy_pattern,
+                "deploy_pattern_type": current.deploy_pattern_type if deploy_pattern_type is None else deploy_pattern_type,
+            }
+            _validate_deploy_policy(**next_policy)
+            return self.state.update_environment(
+                service_name,
+                environment,
+                url_prefix=url_prefix,
+                deploy_mode=deploy_mode,
+                deploy_source=deploy_source,
+                deploy_pattern=deploy_pattern,
+                deploy_pattern_type=deploy_pattern_type,
+            )
         except KeyError as exc:
             raise CatalogError(f"Unknown service environment: {service_name}/{environment}") from exc
 
@@ -438,6 +484,29 @@ def _validate_target_name(environment: str) -> None:
 def _validate_url_prefix(url_prefix: str) -> None:
     if not _URL_PREFIX_RE.fullmatch(url_prefix):
         raise CatalogError("URL prefix must be empty or contain lowercase letters, digits, and dashes")
+
+
+def _validate_deploy_policy(
+    deploy_mode: str,
+    deploy_source: str | None,
+    deploy_pattern: str | None,
+    deploy_pattern_type: str | None,
+) -> None:
+    if deploy_mode not in DEPLOY_MODES:
+        raise CatalogError("Deploy mode must be manual, webhook_auto, or webhook_gated")
+    if deploy_mode == "manual":
+        return
+    if deploy_source not in DEPLOY_SOURCES:
+        raise CatalogError("Deploy source must be branch or tag for webhook targets")
+    if not deploy_pattern:
+        raise CatalogError("Deploy pattern is required for webhook targets")
+    if deploy_pattern_type not in DEPLOY_PATTERN_TYPES:
+        raise CatalogError("Deploy pattern type must be exact or regex for webhook targets")
+    if deploy_pattern_type == "regex":
+        try:
+            re.compile(deploy_pattern)
+        except re.error as exc:
+            raise CatalogError(f"Invalid deploy pattern regex: {exc}") from exc
 
 
 def _validate_env_key(key: str) -> None:
