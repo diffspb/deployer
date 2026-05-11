@@ -198,6 +198,18 @@ function activeJobForRuntime(serviceName, environment) {
   );
 }
 
+function upsertJob(job) {
+  const index = state.jobs.findIndex((item) => item.id === job.id);
+  if (index >= 0) {
+    state.jobs[index] = job;
+  } else {
+    state.jobs = [job, ...state.jobs];
+  }
+  if (state.jobDrawer?.id === job.id) {
+    state.jobDrawer = job;
+  }
+}
+
 function sourceBadge(service) {
   const status = service.source_status;
   if (!status) return `<span class="badge">${escapeHtml(service.source_type)}</span>`;
@@ -1545,6 +1557,8 @@ async function scheduleJob(service, action, environment, extra = {}) {
       method: "POST",
       body: JSON.stringify({ environment, dry_run: false, ...extra }),
     });
+    upsertJob(job);
+    render();
     setToast(`${action} job #${job.id} scheduled for ${service}/${environment}`);
     await pollJob(job.id, service, environment);
   } catch (error) {
@@ -1556,9 +1570,16 @@ async function pollJob(jobId, service, environment) {
   for (let i = 0; i < 60; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, i === 0 ? 250 : 1500));
     const job = await api(`/api/jobs/${jobId}`);
-    await loadAll();
+    upsertJob(job);
     if (["success", "failed"].includes(job.status)) {
-      await loadRuntimePreview(service, environment, true);
+      await loadAll();
+      if (
+        state.currentView.name !== "runtime" ||
+        state.currentView.service !== service ||
+        state.currentView.environment !== environment
+      ) {
+        await loadRuntimePreview(service, environment, true);
+      }
       if (state.logsDrawer && state.logsDrawer.service === service && state.logsDrawer.environment === environment) {
         await reloadLogsDrawer();
       }
