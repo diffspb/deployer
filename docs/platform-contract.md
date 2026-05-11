@@ -113,6 +113,9 @@ variables in the service `environment` map. This makes deployer-managed values o
 defaults such as `APP_ENV: ${APP_ENV:-local}`.
 The same managed env file is passed to Docker Compose via `--env-file`, so `${VAR}` substitutions in
 any compose service can use deployer-managed values.
+Docker Compose runtime commands are executed with BuildKit enabled (`DOCKER_BUILDKIT=1` and
+`COMPOSE_DOCKER_CLI_BUILD=1`) so project Dockerfiles can use BuildKit syntax such as
+`RUN --mount=type=cache`.
 
 Generated labels must include:
 

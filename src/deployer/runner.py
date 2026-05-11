@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
+import os
 from pathlib import Path
 
 from deployer.errors import CommandError
@@ -16,10 +17,14 @@ class CommandResult:
 
 
 class CommandRunner:
-    def run(self, args: Sequence[str], cwd: Path) -> CommandResult:
+    def run(self, args: Sequence[str], cwd: Path, env: dict[str, str] | None = None) -> CommandResult:
+        process_env = None
+        if env:
+            process_env = {**os.environ, **env}
         process = subprocess.run(
             list(args),
             cwd=cwd,
+            env=process_env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

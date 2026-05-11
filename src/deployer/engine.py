@@ -12,6 +12,11 @@ from deployer.runner import CommandRunner
 from deployer.state import StateStore
 
 
+COMPOSE_BUILD_ENV = {
+    "DOCKER_BUILDKIT": "1",
+    "COMPOSE_DOCKER_CLI_BUILD": "1",
+}
+
 _locks_guard = threading.Lock()
 _locks: dict[str, threading.Lock] = {}
 
@@ -88,7 +93,7 @@ class DeploymentEngine:
                 if dry_run:
                     log_parts.append("Dry run: docker compose was not executed")
                 else:
-                    result = self.runner.run(command, cwd=project_dir)
+                    result = self.runner.run(command, cwd=project_dir, env=COMPOSE_BUILD_ENV)
                     log_parts.append(result.output)
                     ok, message = self._check_health(manifest, environment, url_prefix)
                     log_parts.append(message)
@@ -153,7 +158,7 @@ class DeploymentEngine:
                 if dry_run:
                     log_parts.append("Dry run: docker compose was not executed")
                 else:
-                    result = self.runner.run(command, cwd=project_dir)
+                    result = self.runner.run(command, cwd=project_dir, env=COMPOSE_BUILD_ENV)
                     log_parts.append(result.output)
                 log = "\n".join(part for part in log_parts if part)
                 self.state.finish_deployment(deployment_id, "success", log)
@@ -233,7 +238,7 @@ class DeploymentEngine:
         )
         command = compose_command(manifest, override_path, environment=environment, action="ps", env_file=env_file)
         try:
-            result = self.runner.run(command, cwd=project_dir)
+            result = self.runner.run(command, cwd=project_dir, env=COMPOSE_BUILD_ENV)
             return CommandResult(manifest.project_name, environment, "success", result.output, override_path)
         except CommandError as exc:
             return CommandResult(manifest.project_name, environment, "failed", exc.output, override_path)
@@ -269,7 +274,7 @@ class DeploymentEngine:
             env_file=env_file,
         )
         try:
-            result = self.runner.run(command, cwd=project_dir)
+            result = self.runner.run(command, cwd=project_dir, env=COMPOSE_BUILD_ENV)
             return CommandResult(manifest.project_name, environment, "success", result.output, override_path)
         except CommandError as exc:
             return CommandResult(manifest.project_name, environment, "failed", exc.output, override_path)
@@ -321,7 +326,7 @@ class DeploymentEngine:
                 if dry_run:
                     log_parts.append("Dry run: docker compose was not executed")
                 else:
-                    result = self.runner.run(command, cwd=project_dir)
+                    result = self.runner.run(command, cwd=project_dir, env=COMPOSE_BUILD_ENV)
                     log_parts.append(result.output)
                 log = "\n".join(part for part in log_parts if part)
                 self.state.finish_deployment(deployment_id, "success", log)

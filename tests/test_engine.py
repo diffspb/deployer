@@ -1,8 +1,9 @@
 from pathlib import Path
 
 from deployer.errors import CommandError
-from deployer.engine import DeploymentEngine, compose_command
+from deployer.engine import COMPOSE_BUILD_ENV, DeploymentEngine, compose_command
 from deployer.manifest import parse_manifest
+from deployer.runner import CommandResult
 from deployer.state import StateStore
 
 
@@ -62,6 +63,30 @@ def test_compose_command_includes_all_files():
     assert env_command[4:6] == ["--env-file", "/var/lib/deployer/services/myapp/env/prod.env"]
 
 
+def test_deploy_runs_compose_with_buildkit_env(tmp_path: Path):
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "deployer.yml").write_text(
+        """
+name: myapp
+service: app
+port: 8000
+routes:
+  - subdomain: myapp
+"""
+    )
+
+    class Runner:
+        def run(self, args, cwd, env=None):
+            assert env == COMPOSE_BUILD_ENV
+            return CommandResult(tuple(args), 0, "built\n")
+
+    engine = DeploymentEngine(StateStore(tmp_path / "state.db"), runner=Runner(), health_checker=lambda manifest, **kwargs: (True, "ok"))
+
+    result = engine.deploy(tmp_path)
+
+    assert result.status == "success"
+
+
 def test_dry_run_deploy_generates_override_and_history(tmp_path: Path):
     (tmp_path / "docker-compose.yml").write_text("services: {}\n")
     (tmp_path / "deployer.yml").write_text(
@@ -105,7 +130,7 @@ routes:
     )
 
     class FailingRunner:
-        def run(self, args, cwd):
+        def run(self, args, cwd, env=None):
             raise CommandError("failed", 1, "docker failed")
 
     state = StateStore(tmp_path / "state.db")
@@ -180,7 +205,7 @@ routes:
     )
 
     class StatusRunner:
-        def run(self, args, cwd):
+        def run(self, args, cwd, env=None):
             from deployer.runner import CommandResult
 
             assert args[-3:] == ["ps", "--format", "json"]
@@ -207,7 +232,7 @@ routes:
     )
 
     class LogsRunner:
-        def run(self, args, cwd):
+        def run(self, args, cwd, env=None):
             from deployer.runner import CommandResult
 
             assert args[-3:] == ["logs", "--tail", "10"]

@@ -136,7 +136,7 @@ def test_catalog_runtime_commands_local_service(tmp_path: Path):
     catalog.add_local("myapp", project)
 
     class Runner:
-        def run(self, args, cwd):
+        def run(self, args, cwd, env=None):
             if args[-3:] == ["ps", "--format", "json"]:
                 return CommandResult(tuple(args), 0, '[{"Name":"myapp","Service":"app","State":"running","Health":"healthy"}]\n')
             if args[-3:] == ["logs", "--tail", "25"]:
@@ -170,7 +170,7 @@ def test_catalog_git_source_uses_runner_for_clone_refs_and_checkout(tmp_path: Pa
         def __init__(self):
             self.commands = []
 
-        def run(self, args, cwd):
+        def run(self, args, cwd, env=None):
             self.commands.append(tuple(args))
             if args[:2] == ["git", "clone"]:
                 repo = Path(args[3])
@@ -217,7 +217,7 @@ def test_catalog_git_source_uses_runner_for_clone_refs_and_checkout(tmp_path: Pa
 
 def test_catalog_records_checked_out_source_state_when_deploy_fails(tmp_path: Path):
     class GitRunner:
-        def run(self, args, cwd):
+        def run(self, args, cwd, env=None):
             if args[:2] == ["git", "clone"]:
                 repo = Path(args[3])
                 _project(repo)
@@ -236,7 +236,7 @@ def test_catalog_records_checked_out_source_state_when_deploy_fails(tmp_path: Pa
             return CommandResult(tuple(args), 0, "")
 
     class FailingRunner:
-        def run(self, args, cwd):
+        def run(self, args, cwd, env=None):
             raise CommandError("failed", 1, "compose failed")
 
     state = StateStore(tmp_path / "state.db")
@@ -257,7 +257,7 @@ def test_catalog_checkout_prefers_remote_branch_head_when_local_branch_is_stale(
         def __init__(self):
             self.commands = []
 
-        def run(self, args, cwd):
+        def run(self, args, cwd, env=None):
             self.commands.append(tuple(args))
             if args[:2] == ["git", "clone"]:
                 repo = Path(args[3])
