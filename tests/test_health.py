@@ -50,3 +50,17 @@ def test_check_health_failure(monkeypatch):
 
     assert ok is False
     assert "healthcheck failed" in message
+
+
+def test_check_health_timeout_is_reported_as_failed_healthcheck(monkeypatch):
+    def fail(url, timeout):
+        raise TimeoutError("read operation timed out")
+
+    monkeypatch.setattr("deployer.health.urlopen", fail)
+    monkeypatch.setattr("deployer.health.sleep", lambda seconds: None)
+
+    ok, message = check_health(_manifest())
+
+    assert ok is False
+    assert "healthcheck failed" in message
+    assert "read operation timed out" in message

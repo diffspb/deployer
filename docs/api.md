@@ -212,6 +212,8 @@ replaces project-level defaults such as `APP_ENV: ${APP_ENV:-local}`.
 Runtime-changing actions are asynchronous from the API contract point of view. The API creates a job, starts the
 operation in the background, and returns HTTP `202` with the current job payload. The UI should poll
 `GET /api/jobs/{job_id}` until `status` becomes `success` or `failed`.
+`GET /api/jobs` returns job metadata without heavy logs. Fetch a single job to inspect output.
+`GET /api/jobs/{job_id}?log_limit=200000` returns the most recent output up to `log_limit` characters.
 
 Deploy:
 
@@ -258,6 +260,7 @@ Job payload:
   "started_at": "2026-05-10T10:00:01+00:00",
   "finished_at": "2026-05-10T10:00:30+00:00",
   "log": "Generated override: ...",
+  "log_truncated": false,
   "error": null
 }
 ```

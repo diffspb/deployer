@@ -87,10 +87,17 @@ def test_api_service_local_env_deploy_history_and_delete(tmp_path: Path):
     assert job["status"] == "success"
     assert job["deployment_id"] is not None
     assert "Dry run" in job["log"]
+    assert job["log_truncated"] is False
 
     jobs = client.get("/api/jobs?service=myapp&environment=prod").json()
     assert jobs["jobs"][0]["id"] == job_id
-    assert "Dry run" in jobs["jobs"][0]["log"]
+    assert jobs["jobs"][0]["log"] == ""
+    assert jobs["jobs"][0]["log_truncated"] is True
+
+    short_job = client.get(f"/api/jobs/{job_id}?log_limit=8").json()
+    assert short_job["log"].startswith("[output truncated")
+    assert short_job["log"].endswith("executed")
+    assert short_job["log_truncated"] is True
 
     history = client.get("/api/services/myapp/history?environment=prod").json()
     assert history["environments"][0]["current_ref"] == "main"

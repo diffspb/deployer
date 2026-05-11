@@ -1019,6 +1019,7 @@ function renderJobDrawer() {
         </div>
         <div class="section">
           <div class="section-title">CLI Output</div>
+          ${job.log_truncated ? `<div class="inline-error">Output is truncated. Showing the most recent part.</div>` : ""}
           <pre class="log-box">${escapeHtml(job.log || "No job output yet.")}</pre>
         </div>
       </div>

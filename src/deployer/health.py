@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from socket import timeout as SocketTimeout
 from urllib.error import URLError
 from urllib.request import urlopen
 from time import sleep
@@ -39,7 +40,7 @@ def check_health(manifest: Manifest, environment: str = "prod", url_prefix: str 
                 if 200 <= status < 300:
                     return True, f"healthcheck ok: {url} after {attempt} attempt(s)"
                 last_error = f"status {status}"
-        except URLError as exc:
+        except (TimeoutError, SocketTimeout, URLError, OSError) as exc:
             last_error = str(exc)
         if attempt < retries:
             sleep(interval)

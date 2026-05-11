@@ -211,14 +211,18 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         environment: str | None = None,
         limit: int = Query(default=50, ge=1, le=200),
     ) -> dict:
-        return {"jobs": [_job_payload(job) for job in context.state.list_jobs(service, environment, limit)]}
+        return {"jobs": [_job_payload(job, log_limit=0) for job in context.state.list_jobs(service, environment, limit)]}
 
     @app.get("/api/jobs/{job_id}")
-    def get_job(job_id: int, context: ContextDep) -> dict:
+    def get_job(
+        job_id: int,
+        context: ContextDep,
+        log_limit: int = Query(default=200_000, ge=0, le=1_000_000),
+    ) -> dict:
         job = context.state.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}")
-        return _job_payload(job)
+        return _job_payload(job, log_limit=log_limit)
 
     @app.post("/api/services/{name}/deploy", status_code=202)
     def deploy(name: str, payload: DeployRequest, background_tasks: BackgroundTasks, context: ContextDep) -> dict:
@@ -529,6 +533,15 @@ def _empty_status_summary() -> dict:
     }
 
 
+def _limited_log(log: str, limit: int | None) -> tuple[str, bool]:
+    if limit is None or len(log) <= limit:
+        return log, False
+    if limit <= 0:
+        return "", bool(log)
+    marker = f"[output truncated to last {limit} characters]\n"
+    return marker + log[-limit:], True
+
+
 def _load_service_manifest(service: ServiceRecord) -> Manifest | None:
     try:
         return load_manifest(Path(service.source_path))
@@ -610,9 +623,10 @@ def _run_runtime_job(config: DeployerConfig, job_id: int) -> None:
         context.state.finish_job(job_id, "failed", str(exc), error=str(exc))
 
 
-def _job_payload(job: JobRecord | None) -> dict:
+def _job_payload(job: JobRecord | None, log_limit: int | None = None) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="Unknown job")
+    log, log_truncated = _limited_log(job.log, log_limit)
     return {
         "id": job.id,
         "service": job.service,
@@ -626,7 +640,8 @@ def _job_payload(job: JobRecord | None) -> dict:
         "created_at": job.created_at,
         "started_at": job.started_at,
         "finished_at": job.finished_at,
-        "log": job.log,
+        "log": log,
+        "log_truncated": log_truncated,
         "error": job.error,
     }
 
