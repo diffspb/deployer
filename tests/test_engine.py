@@ -54,6 +54,13 @@ def test_compose_command_includes_all_files():
     dev_command = compose_command(manifest, Path(".deployer/docker-compose.override.yml"), environment="dev")
     assert dev_command[3] == "myapp-dev"
 
+    env_command = compose_command(
+        manifest,
+        Path(".deployer/docker-compose.override.yml"),
+        env_file="/var/lib/deployer/services/myapp/env/prod.env",
+    )
+    assert env_command[4:6] == ["--env-file", "/var/lib/deployer/services/myapp/env/prod.env"]
+
 
 def test_dry_run_deploy_generates_override_and_history(tmp_path: Path):
     (tmp_path / "docker-compose.yml").write_text("services: {}\n")

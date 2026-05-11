@@ -234,12 +234,12 @@ Stop/down/restart:
 
 Semantics:
 
-- `deploy` runs `docker compose up -d --build`.
-- `stop` runs `docker compose stop` and keeps containers.
-- `down` runs `docker compose down` and removes containers.
-- `restart` runs `docker compose restart`.
-- `status` runs `docker compose ps`.
-- `logs` runs `docker compose logs --tail <n>`.
+- `deploy` runs `docker compose --env-file <managed-env> up -d --build`.
+- `stop` runs `docker compose --env-file <managed-env> stop` and keeps containers.
+- `down` runs `docker compose --env-file <managed-env> down` and removes containers.
+- `restart` runs `docker compose --env-file <managed-env> restart`.
+- `status` runs `docker compose --env-file <managed-env> ps`.
+- `logs` runs `docker compose --env-file <managed-env> logs --tail <n>`.
 
 Job payload:
 

@@ -50,6 +50,7 @@ def test_catalog_deploys_local_service_through_engine_dry_run(tmp_path: Path):
 
     assert result.status == "success"
     assert result.override_path == tmp_path / "runtime" / "services" / "myapp" / "overrides" / "dev.override.yml"
+    assert "--env-file" in result.log
     assert "env_file" in result.override_path.read_text()
     assert "environment:\n      GREETING: hello world" in result.override_path.read_text()
     assert (tmp_path / "runtime" / "services" / "myapp" / "env" / "dev.env").read_text() == 'GREETING="hello world"\n'

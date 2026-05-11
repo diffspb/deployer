@@ -82,7 +82,7 @@ class DeploymentEngine:
                     env_vars=env_vars,
                 )
                 log_parts.append(f"Generated override: {override_path}")
-                command = compose_command(manifest, override_path, environment=environment)
+                command = compose_command(manifest, override_path, environment=environment, env_file=env_file)
                 log_parts.append(f"Command: {' '.join(command)}")
 
                 if dry_run:
@@ -142,7 +142,13 @@ class DeploymentEngine:
                     env_vars=env_vars,
                 )
                 log_parts.append(f"Generated override: {override_path}")
-                command = compose_command(manifest, override_path, environment=environment, action="stop")
+                command = compose_command(
+                    manifest,
+                    override_path,
+                    environment=environment,
+                    action="stop",
+                    env_file=env_file,
+                )
                 log_parts.append(f"Command: {' '.join(command)}")
                 if dry_run:
                     log_parts.append("Dry run: docker compose was not executed")
@@ -225,7 +231,7 @@ class DeploymentEngine:
             url_prefix=url_prefix,
             env_vars=env_vars,
         )
-        command = compose_command(manifest, override_path, environment=environment, action="ps")
+        command = compose_command(manifest, override_path, environment=environment, action="ps", env_file=env_file)
         try:
             result = self.runner.run(command, cwd=project_dir)
             return CommandResult(manifest.project_name, environment, "success", result.output, override_path)
@@ -254,7 +260,14 @@ class DeploymentEngine:
             url_prefix=url_prefix,
             env_vars=env_vars,
         )
-        command = compose_command(manifest, override_path, environment=environment, action="logs", tail=tail)
+        command = compose_command(
+            manifest,
+            override_path,
+            environment=environment,
+            action="logs",
+            tail=tail,
+            env_file=env_file,
+        )
         try:
             result = self.runner.run(command, cwd=project_dir)
             return CommandResult(manifest.project_name, environment, "success", result.output, override_path)
@@ -297,7 +310,13 @@ class DeploymentEngine:
                     env_vars=env_vars,
                 )
                 log_parts.append(f"Generated override: {override_path}")
-                command = compose_command(manifest, override_path, environment=environment, action=action)
+                command = compose_command(
+                    manifest,
+                    override_path,
+                    environment=environment,
+                    action=action,
+                    env_file=env_file,
+                )
                 log_parts.append(f"Command: {' '.join(command)}")
                 if dry_run:
                     log_parts.append("Dry run: docker compose was not executed")
@@ -331,8 +350,11 @@ def compose_command(
     environment: str = "prod",
     action: str = "up",
     tail: int = 200,
+    env_file: str | None = None,
 ) -> list[str]:
     command = ["docker", "compose", "-p", manifest.project_name_for(environment)]
+    if env_file:
+        command.extend(["--env-file", env_file])
     for file in manifest.compose.files:
         command.extend(["-f", file])
     command.extend(["-f", str(override_path)])

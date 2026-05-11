@@ -111,6 +111,8 @@ The original project compose files are not modified.
 For managed services the generated override also contains the target env file and the same managed
 variables in the service `environment` map. This makes deployer-managed values override project-level
 defaults such as `APP_ENV: ${APP_ENV:-local}`.
+The same managed env file is passed to Docker Compose via `--env-file`, so `${VAR}` substitutions in
+any compose service can use deployer-managed values.
 
 Generated labels must include:
 

@@ -78,12 +78,12 @@ deployer history --state-db /var/lib/deployer/state.db tasktrack
 
 Runtime command semantics:
 
-- `deploy` runs `docker compose up -d --build`.
-- `stop` runs `docker compose stop` and keeps containers.
-- `down` runs `docker compose down` and removes containers, but not images or named volumes.
-- `restart` runs `docker compose restart`.
-- `status` runs `docker compose ps`.
-- `logs` runs `docker compose logs --tail <n>`.
+- `deploy` runs `docker compose --env-file <managed-env> up -d --build`.
+- `stop` runs `docker compose --env-file <managed-env> stop` and keeps containers.
+- `down` runs `docker compose --env-file <managed-env> down` and removes containers, but not images or named volumes.
+- `restart` runs `docker compose --env-file <managed-env> restart`.
+- `status` runs `docker compose --env-file <managed-env> ps`.
+- `logs` runs `docker compose --env-file <managed-env> logs --tail <n>`.
 
 Catalog `history` prints current service runtime target metadata before deployment records:
 
@@ -113,7 +113,7 @@ Path mode:
 3. Generate `.deployer/<environment>.override.yml`.
 4. Create deployment record in SQLite.
 5. Acquire per-project lock.
-6. Run `docker compose -p <name> -f ... up -d --build`.
+6. Run `docker compose -p <name> --env-file <managed-env> -f ... up -d --build`.
 7. Run optional healthcheck.
 8. Mark deployment as `success` or `failed`.
 9. Persist command log.
