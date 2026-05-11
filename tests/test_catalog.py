@@ -215,6 +215,43 @@ def test_catalog_git_source_uses_runner_for_clone_refs_and_checkout(tmp_path: Pa
     assert ("git", "checkout", "-B", "main", "--track", "origin/main") in runner.commands
 
 
+def test_catalog_records_checked_out_source_state_when_deploy_fails(tmp_path: Path):
+    class GitRunner:
+        def run(self, args, cwd):
+            if args[:2] == ["git", "clone"]:
+                repo = Path(args[3])
+                _project(repo)
+                (repo / ".git").mkdir()
+                return CommandResult(tuple(args), 0, "cloned\n")
+            if args[:3] == ["git", "fetch", "--all"]:
+                return CommandResult(tuple(args), 0, "fetched\n")
+            if args[:3] == ["git", "show-ref", "--verify"]:
+                return CommandResult(tuple(args), 0, "abc refs/remotes/origin/main\n")
+            if args[:4] == ["git", "checkout", "-B", "main"]:
+                return CommandResult(tuple(args), 0, "reset branch\n")
+            if args[:3] == ["git", "branch", "--show-current"]:
+                return CommandResult(tuple(args), 0, "main\n")
+            if args[:2] == ["git", "rev-parse"]:
+                return CommandResult(tuple(args), 0, "abc123\n")
+            return CommandResult(tuple(args), 0, "")
+
+    class FailingRunner:
+        def run(self, args, cwd):
+            raise CommandError("failed", 1, "compose failed")
+
+    state = StateStore(tmp_path / "state.db")
+    catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime", runner=GitRunner())
+    catalog.add_git("myapp", "git@example.com/myapp.git", default_branch="main")
+
+    result = catalog.deploy("myapp", DeploymentEngine(state, runner=FailingRunner()), environment="prod")
+
+    env = state.require_environment("myapp", "prod")
+    assert result.status == "failed"
+    assert env.current_ref == "main"
+    assert env.current_commit == "abc123"
+    assert env.last_deployment_id is None
+
+
 def test_catalog_checkout_prefers_remote_branch_head_when_local_branch_is_stale(tmp_path: Path):
     class GitRunner:
         def __init__(self):

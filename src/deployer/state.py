@@ -489,6 +489,25 @@ class StateStore:
                 (version, ref, commit_hash, deployment_id, _now(), record.id),
             )
 
+    def update_environment_source_state(
+        self,
+        service_name: str,
+        environment: str,
+        version: str | None,
+        ref: str | None,
+        commit_hash: str | None,
+    ) -> None:
+        record = self.require_environment(service_name, environment)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE environments
+                SET current_version = ?, current_ref = ?, current_commit = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (version, ref, commit_hash, _now(), record.id),
+            )
+
     def finish_deployment(self, deployment_id: int, status: str, log: str) -> None:
         if status not in {"success", "failed"}:
             raise ValueError("status must be success or failed")

@@ -299,6 +299,13 @@ class ServiceCatalog:
         dry_run: bool = False,
     ) -> DeployResult:
         runtime = self.prepare_runtime(service_name, environment, ref)
+        self.state.update_environment_source_state(
+            service_name,
+            environment,
+            version or runtime.ref,
+            runtime.ref,
+            runtime.commit_hash,
+        )
         result = engine.deploy(
             runtime.project_dir,
             version=version or runtime.ref,
