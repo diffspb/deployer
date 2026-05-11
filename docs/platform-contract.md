@@ -116,6 +116,8 @@ any compose service can use deployer-managed values.
 Docker Compose runtime commands are executed with BuildKit enabled (`DOCKER_BUILDKIT=1` and
 `COMPOSE_DOCKER_CLI_BUILD=1`) so project Dockerfiles can use BuildKit syntax such as
 `RUN --mount=type=cache`.
+The packaged deployer image includes both Docker Compose and Buildx CLI plugins; BuildKit-only
+Dockerfiles will fail if the running deployer image was built before Buildx was added.
 
 Generated labels must include:
 
