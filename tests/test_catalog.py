@@ -128,6 +128,78 @@ def test_catalog_validates_runtime_target_policy(tmp_path: Path):
         )
 
 
+def test_catalog_adds_environment_project_without_manifest(tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    catalog = ServiceCatalog(StateStore(tmp_path / "state.db"), runtime_dir=tmp_path / "runtime")
+
+    project = catalog.add_project_local(
+        "dev",
+        "tasktrack",
+        source,
+        default_ref="dev",
+        deploy_mode="webhook_auto",
+        deploy_source="branch",
+        deploy_pattern="dev",
+        deploy_pattern_type="exact",
+    )
+    catalog.add_component(
+        "dev",
+        "tasktrack",
+        "backend",
+        mode="build",
+        build_context="backend",
+        dockerfile="Dockerfile",
+        port=8000,
+    )
+    catalog.add_endpoint(
+        "dev",
+        "tasktrack",
+        "api",
+        "backend",
+        8000,
+        subdomain="api.tasktrack",
+        auth="sso",
+        healthcheck_path="/api/v1/health",
+    )
+    catalog.add_dependency(
+        "dev",
+        "tasktrack",
+        "postgres",
+        "postgres",
+        "postgres-main/tasktrack_dev",
+        outputs={"DATABASE_URL": "postgresql://tasktrack_dev@example/tasktrack_dev"},
+    )
+    catalog.set_project_env("dev", "tasktrack", "APP_ENV", "dev")
+    env_path = catalog.render_project_env_file("dev", "tasktrack")
+    config = catalog.project_config("dev", "tasktrack")
+
+    assert project.environment == "dev"
+    assert project.name == "tasktrack"
+    assert config.project.env_vars == {"APP_ENV": "dev"}
+    assert config.components[0].name == "backend"
+    assert config.endpoints[0].subdomain == "api.tasktrack"
+    assert config.dependencies[0].target == "postgres-main/tasktrack_dev"
+    assert env_path == tmp_path / "runtime" / "environments" / "dev" / "projects" / "tasktrack" / "env" / "project.env"
+    assert env_path.read_text() == "APP_ENV=dev\n"
+
+
+def test_catalog_allows_same_project_name_in_different_environments(tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    catalog = ServiceCatalog(StateStore(tmp_path / "state.db"), runtime_dir=tmp_path / "runtime")
+
+    catalog.add_project_local("dev", "tasktrack", source, default_ref="dev")
+    catalog.add_project_local("prod", "tasktrack", source, default_ref="main")
+    catalog.set_project_env("dev", "tasktrack", "APP_ENV", "dev")
+    catalog.set_project_env("prod", "tasktrack", "APP_ENV", "prod")
+
+    assert catalog.get_project("dev", "tasktrack").default_ref == "dev"
+    assert catalog.get_project("prod", "tasktrack").default_ref == "main"
+    assert catalog.get_project("dev", "tasktrack").env_vars == {"APP_ENV": "dev"}
+    assert catalog.get_project("prod", "tasktrack").env_vars == {"APP_ENV": "prod"}
+
+
 def test_render_env_quotes_unsafe_values():
     assert render_env({"A": "plain", "B": "has space", "C": ""}) == 'A=plain\nB="has space"\nC=""\n'
 

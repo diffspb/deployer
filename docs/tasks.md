@@ -61,12 +61,13 @@
 - [x] Document dependency/resource binding direction.
 - [ ] Replace current SQLite schema without compatibility migrations.
 - [ ] Remove global services as deployable/operator objects.
-- [ ] Add environment-scoped `projects` table.
-- [ ] Add `components` table for compose services, generated builds, and image-based containers.
-- [ ] Add `endpoints` table for Traefik-exposed component routes.
-- [ ] Add initial `dependencies` table for resource bindings.
+- [x] Add environment-scoped `projects` table.
+- [x] Add `components` table for compose services, generated builds, and image-based containers.
+- [x] Add `endpoints` table for Traefik-exposed component routes.
+- [x] Add initial `dependencies` table for resource bindings.
 - [ ] Scope jobs and deployments by `environment + project`.
-- [ ] Replace service catalog layer with environment project catalog operations.
+- [x] Add environment project catalog operations alongside the old service catalog.
+- [ ] Replace service catalog layer with environment project catalog operations in CLI/API/UI.
 - [ ] Refactor engine to deploy a resolved project spec instead of requiring repository-local `deployer.yml`.
 - [ ] Support compose overlay mode for existing compose files.
 - [ ] Support generated compose mode from component definitions.

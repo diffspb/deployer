@@ -10,7 +10,17 @@ from deployer.engine import CommandResult, DeployResult, DeploymentEngine
 from deployer.errors import CommandError, DeployerError
 from deployer.manifest import load_manifest
 from deployer.runner import CommandRunner
-from deployer.state import DeploymentRecord, EnvironmentProfileRecord, EnvironmentRecord, ServiceRecord, StateStore
+from deployer.state import (
+    DeploymentRecord,
+    EnvironmentProfileRecord,
+    EnvironmentProjectRecord,
+    EnvironmentRecord,
+    ProjectComponentRecord,
+    ProjectDependencyRecord,
+    ProjectEndpointRecord,
+    ServiceRecord,
+    StateStore,
+)
 
 
 DEFAULT_RUNTIME_DIR = Path("/var/lib/deployer")
@@ -52,6 +62,14 @@ class SourceStatus:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class EnvironmentProjectConfig:
+    project: EnvironmentProjectRecord
+    components: tuple[ProjectComponentRecord, ...]
+    endpoints: tuple[ProjectEndpointRecord, ...]
+    dependencies: tuple[ProjectDependencyRecord, ...]
+
+
 class CatalogError(DeployerError):
     pass
 
@@ -80,6 +98,253 @@ class ServiceCatalog:
             raise CatalogError(f"Service already exists: {name}") from exc
         except ValueError as exc:
             raise CatalogError(f"Cannot add service {name}: {exc}") from exc
+
+    def add_project_local(
+        self,
+        environment: str,
+        name: str,
+        path: Path,
+        default_ref: str | None = None,
+        deploy_mode: str = "manual",
+        deploy_source: str | None = None,
+        deploy_pattern: str | None = None,
+        deploy_pattern_type: str | None = None,
+    ) -> EnvironmentProjectRecord:
+        _validate_target_name(environment)
+        _validate_service_name(name)
+        _validate_deploy_policy(deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type)
+        source_path = path.resolve()
+        if not source_path.exists():
+            raise CatalogError(f"Local source does not exist: {source_path}")
+        try:
+            return self.state.add_project(
+                environment,
+                name,
+                "local",
+                str(source_path),
+                default_ref=default_ref,
+                deploy_mode=deploy_mode,
+                deploy_source=deploy_source,
+                deploy_pattern=deploy_pattern,
+                deploy_pattern_type=deploy_pattern_type,
+            )
+        except KeyError as exc:
+            raise CatalogError(f"Unknown environment: {environment}") from exc
+        except sqlite3.IntegrityError as exc:
+            raise CatalogError(f"Project already exists: {environment}/{name}") from exc
+        except ValueError as exc:
+            raise CatalogError(f"Cannot add project {environment}/{name}: {exc}") from exc
+
+    def add_project_git(
+        self,
+        environment: str,
+        name: str,
+        git_url: str,
+        default_ref: str | None = None,
+        deploy_mode: str = "manual",
+        deploy_source: str | None = None,
+        deploy_pattern: str | None = None,
+        deploy_pattern_type: str | None = None,
+    ) -> EnvironmentProjectRecord:
+        _validate_target_name(environment)
+        _validate_service_name(name)
+        _validate_deploy_policy(deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type)
+        project_dir = self.project_dir(environment, name)
+        repo_dir = project_dir / "repo"
+        if repo_dir.exists():
+            raise CatalogError(f"Repository already exists: {repo_dir}")
+        project_dir.mkdir(parents=True, exist_ok=True)
+        self.runner.run(["git", "clone", git_url, str(repo_dir)], cwd=project_dir)
+        if default_ref:
+            self.runner.run(["git", "checkout", default_ref], cwd=repo_dir)
+        try:
+            return self.state.add_project(
+                environment,
+                name,
+                "git",
+                str(repo_dir),
+                source_url=git_url,
+                default_ref=default_ref,
+                deploy_mode=deploy_mode,
+                deploy_source=deploy_source,
+                deploy_pattern=deploy_pattern,
+                deploy_pattern_type=deploy_pattern_type,
+            )
+        except KeyError as exc:
+            raise CatalogError(f"Unknown environment: {environment}") from exc
+        except sqlite3.IntegrityError as exc:
+            raise CatalogError(f"Project already exists: {environment}/{name}") from exc
+        except ValueError as exc:
+            raise CatalogError(f"Cannot add project {environment}/{name}: {exc}") from exc
+
+    def list_projects(self, environment: str | None = None) -> list[EnvironmentProjectRecord]:
+        if environment is not None:
+            _validate_target_name(environment)
+        return self.state.list_projects(environment)
+
+    def get_project(self, environment: str, name: str) -> EnvironmentProjectRecord:
+        _validate_target_name(environment)
+        _validate_service_name(name)
+        try:
+            return self.state.require_project(environment, name)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown project: {environment}/{name}") from exc
+
+    def remove_project(self, environment: str, name: str, delete_files: bool = False) -> bool:
+        _validate_target_name(environment)
+        _validate_service_name(name)
+        removed = self.state.remove_project(environment, name)
+        if delete_files:
+            shutil.rmtree(self.project_dir(environment, name), ignore_errors=True)
+        return removed
+
+    def project_config(self, environment: str, name: str) -> EnvironmentProjectConfig:
+        project = self.get_project(environment, name)
+        return EnvironmentProjectConfig(
+            project=project,
+            components=tuple(self.state.list_components(environment, name)),
+            endpoints=tuple(self.state.list_endpoints(environment, name)),
+            dependencies=tuple(self.state.list_dependencies(environment, name)),
+        )
+
+    def add_component(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        mode: str = "compose",
+        compose_service: str | None = None,
+        build_context: str | None = None,
+        dockerfile: str | None = None,
+        image: str | None = None,
+        command: str | None = None,
+        port: int | None = None,
+        env_vars: dict[str, str] | None = None,
+    ) -> ProjectComponentRecord:
+        _validate_project_scope(environment, project)
+        _validate_component_name(name)
+        _validate_component(mode, compose_service, build_context, dockerfile, image, port)
+        for key, value in (env_vars or {}).items():
+            _validate_env_key(key)
+            if "\n" in value:
+                raise CatalogError("Environment values must be single-line")
+        try:
+            return self.state.add_component(
+                environment,
+                project,
+                name,
+                mode=mode,
+                compose_service=compose_service,
+                build_context=build_context,
+                dockerfile=dockerfile,
+                image=image,
+                command=command,
+                port=port,
+                env_vars=env_vars,
+            )
+        except KeyError as exc:
+            raise CatalogError(f"Unknown project: {environment}/{project}") from exc
+        except sqlite3.IntegrityError as exc:
+            raise CatalogError(f"Component already exists: {environment}/{project}/{name}") from exc
+
+    def add_endpoint(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        component: str,
+        port: int,
+        host: str | None = None,
+        subdomain: str | None = None,
+        path_prefix: str | None = None,
+        auth: str = "none",
+        middlewares: tuple[str, ...] = (),
+        healthcheck_path: str | None = None,
+    ) -> ProjectEndpointRecord:
+        _validate_project_scope(environment, project)
+        _validate_component_name(name)
+        _validate_component_name(component)
+        if port <= 0:
+            raise CatalogError("Endpoint port must be positive")
+        if not host and not subdomain:
+            raise CatalogError("Endpoint must define host or subdomain")
+        if host and subdomain:
+            raise CatalogError("Endpoint must not define both host and subdomain")
+        if auth not in {"none", "sso"}:
+            raise CatalogError("Endpoint auth must be one of: none, sso")
+        if path_prefix is not None and not path_prefix.startswith("/"):
+            raise CatalogError("Endpoint path prefix must start with /")
+        if healthcheck_path is not None and not healthcheck_path.startswith("/"):
+            raise CatalogError("Endpoint healthcheck path must start with /")
+        try:
+            return self.state.add_endpoint(
+                environment,
+                project,
+                name,
+                component,
+                port,
+                host=host,
+                subdomain=subdomain,
+                path_prefix=path_prefix,
+                auth=auth,
+                middlewares=middlewares,
+                healthcheck_path=healthcheck_path,
+            )
+        except KeyError as exc:
+            raise CatalogError(f"Unknown project component: {environment}/{project}/{component}") from exc
+        except sqlite3.IntegrityError as exc:
+            raise CatalogError(f"Endpoint already exists: {environment}/{project}/{name}") from exc
+
+    def add_dependency(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        type: str,
+        target: str,
+        outputs: dict[str, str] | None = None,
+    ) -> ProjectDependencyRecord:
+        _validate_project_scope(environment, project)
+        _validate_component_name(name)
+        if not type.strip():
+            raise CatalogError("Dependency type must be non-empty")
+        if not target.strip():
+            raise CatalogError("Dependency target must be non-empty")
+        for key, value in (outputs or {}).items():
+            _validate_env_key(key)
+            if "\n" in value:
+                raise CatalogError("Dependency outputs must be single-line")
+        try:
+            return self.state.add_dependency(environment, project, name, type, target, outputs=outputs)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown project: {environment}/{project}") from exc
+        except sqlite3.IntegrityError as exc:
+            raise CatalogError(f"Dependency already exists: {environment}/{project}/{name}") from exc
+
+    def set_project_env(self, environment: str, project: str, key: str, value: str) -> EnvironmentProjectRecord:
+        _validate_project_scope(environment, project)
+        _validate_env_key(key)
+        if "\n" in value:
+            raise CatalogError("Environment values must be single-line")
+        try:
+            return self.state.set_project_env_var(environment, project, key, value)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown project: {environment}/{project}") from exc
+
+    def unset_project_env(self, environment: str, project: str, key: str) -> EnvironmentProjectRecord:
+        _validate_project_scope(environment, project)
+        _validate_env_key(key)
+        try:
+            return self.state.unset_project_env_var(environment, project, key)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown project: {environment}/{project}") from exc
+
+    def render_project_env_file(self, environment: str, project: str) -> Path:
+        record = self.get_project(environment, project)
+        env_file = self.project_dir(environment, project) / "env" / "project.env"
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text(render_env(record.env_vars))
+        return env_file
 
     def add_git(self, name: str, git_url: str, default_branch: str | None = None) -> ServiceRecord:
         _validate_service_name(name)
@@ -480,6 +745,9 @@ class ServiceCatalog:
     def service_dir(self, name: str) -> Path:
         return self.runtime_dir / "services" / name
 
+    def project_dir(self, environment: str, name: str) -> Path:
+        return self.runtime_dir / "environments" / environment / "projects" / name
+
     def _ensure_service_absent(self, name: str) -> None:
         if self.state.get_service(name) is not None:
             raise CatalogError(f"Service already exists: {name}")
@@ -525,6 +793,38 @@ def _validate_service_name(name: str) -> None:
 def _validate_target_name(environment: str) -> None:
     if not _TARGET_NAME_RE.fullmatch(environment):
         raise CatalogError("Runtime target name must contain lowercase letters, digits, and dashes")
+
+
+def _validate_project_scope(environment: str, project: str) -> None:
+    _validate_target_name(environment)
+    _validate_service_name(project)
+
+
+def _validate_component_name(name: str) -> None:
+    if not _TARGET_NAME_RE.fullmatch(name):
+        raise CatalogError("Component name must contain lowercase letters, digits, and dashes")
+
+
+def _validate_component(
+    mode: str,
+    compose_service: str | None,
+    build_context: str | None,
+    dockerfile: str | None,
+    image: str | None,
+    port: int | None,
+) -> None:
+    if mode not in {"compose", "build", "image"}:
+        raise CatalogError("Component mode must be compose, build, or image")
+    if mode == "compose" and not compose_service:
+        raise CatalogError("Compose component requires compose_service")
+    if mode == "build" and not build_context:
+        raise CatalogError("Build component requires build_context")
+    if mode == "image" and not image:
+        raise CatalogError("Image component requires image")
+    if dockerfile is not None and not dockerfile.strip():
+        raise CatalogError("Dockerfile must be non-empty")
+    if port is not None and port <= 0:
+        raise CatalogError("Component port must be positive")
 
 
 def _validate_url_prefix(url_prefix: str) -> None:

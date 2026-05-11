@@ -146,3 +146,63 @@ def test_state_tracks_runtime_jobs(tmp_path: Path):
     assert finished.started_at is not None
     assert finished.finished_at is not None
     assert state.list_jobs(service="myapp")[0].id == job_id
+
+
+def test_state_stores_environment_scoped_projects(tmp_path: Path):
+    state = StateStore(tmp_path / "state.db")
+
+    dev = state.add_project("dev", "tasktrack", "local", "/srv/tasktrack", default_ref="dev")
+    prod = state.add_project("prod", "tasktrack", "local", "/srv/tasktrack", default_ref="main")
+    state.set_project_env_var("dev", "tasktrack", "APP_ENV", "dev")
+    state.set_project_env_var("prod", "tasktrack", "APP_ENV", "prod")
+
+    assert dev.environment == "dev"
+    assert prod.environment == "prod"
+    assert state.require_project("dev", "tasktrack").default_ref == "dev"
+    assert state.require_project("prod", "tasktrack").default_ref == "main"
+    assert state.require_project("dev", "tasktrack").env_vars == {"APP_ENV": "dev"}
+    assert state.require_project("prod", "tasktrack").env_vars == {"APP_ENV": "prod"}
+    assert [project.environment for project in state.list_projects()] == ["dev", "prod"]
+    assert [project.name for project in state.list_projects("dev")] == ["tasktrack"]
+
+
+def test_state_stores_project_components_endpoints_and_dependencies(tmp_path: Path):
+    state = StateStore(tmp_path / "state.db")
+    state.add_project("dev", "tasktrack", "local", "/srv/tasktrack")
+
+    component = state.add_component(
+        "dev",
+        "tasktrack",
+        "backend",
+        mode="build",
+        build_context="backend",
+        dockerfile="Dockerfile",
+        port=8000,
+        env_vars={"APP_ENV": "dev"},
+    )
+    endpoint = state.add_endpoint(
+        "dev",
+        "tasktrack",
+        "api",
+        "backend",
+        8000,
+        subdomain="api.tasktrack",
+        auth="sso",
+        healthcheck_path="/api/v1/health",
+    )
+    dependency = state.add_dependency(
+        "dev",
+        "tasktrack",
+        "postgres",
+        "postgres",
+        "postgres-main/tasktrack_dev",
+        outputs={"DATABASE_URL": "postgresql://tasktrack_dev@example/tasktrack_dev"},
+    )
+
+    assert component.build_context == "backend"
+    assert state.list_components("dev", "tasktrack")[0].env_vars == {"APP_ENV": "dev"}
+    assert endpoint.component == "backend"
+    assert endpoint.auth == "sso"
+    assert endpoint.healthcheck_path == "/api/v1/health"
+    assert dependency.outputs["DATABASE_URL"].startswith("postgresql://")
+    assert state.list_dependencies("dev", "tasktrack")[0].target == "postgres-main/tasktrack_dev"

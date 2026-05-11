@@ -65,6 +65,74 @@ class EnvironmentRecord:
 
 
 @dataclass(frozen=True)
+class EnvironmentProjectRecord:
+    id: int
+    environment: str
+    name: str
+    source_type: str
+    source_url: str | None
+    source_path: str
+    default_ref: str | None
+    deploy_mode: str
+    deploy_source: str | None
+    deploy_pattern: str | None
+    deploy_pattern_type: str | None
+    env_vars: dict[str, str]
+    current_version: str | None
+    current_ref: str | None
+    current_commit: str | None
+    last_deployment_id: int | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class ProjectComponentRecord:
+    id: int
+    project_id: int
+    name: str
+    mode: str
+    compose_service: str | None
+    build_context: str | None
+    dockerfile: str | None
+    image: str | None
+    command: str | None
+    port: int | None
+    env_vars: dict[str, str]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class ProjectEndpointRecord:
+    id: int
+    project_id: int
+    name: str
+    component: str
+    port: int
+    host: str | None
+    subdomain: str | None
+    path_prefix: str | None
+    auth: str
+    middlewares: tuple[str, ...]
+    healthcheck_path: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class ProjectDependencyRecord:
+    id: int
+    project_id: int
+    name: str
+    type: str
+    target: str
+    outputs: dict[str, str]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class JobRecord:
     id: int
     service: str
@@ -359,11 +427,374 @@ class StateStore:
 
     def remove_environment_profile(self, name: str) -> bool:
         with self._connect() as conn:
-            used = conn.execute("SELECT 1 FROM environments WHERE name = ? LIMIT 1", (name,)).fetchone()
-            if used:
+            old_used = conn.execute("SELECT 1 FROM environments WHERE name = ? LIMIT 1", (name,)).fetchone()
+            new_used = conn.execute(
+                "SELECT 1 FROM environment_projects WHERE environment = ? LIMIT 1",
+                (name,),
+            ).fetchone()
+            if old_used or new_used:
                 raise ValueError(f"Environment profile is in use: {name}")
             cursor = conn.execute("DELETE FROM environment_profiles WHERE name = ?", (name,))
             return cursor.rowcount > 0
+
+    def add_project(
+        self,
+        environment: str,
+        name: str,
+        source_type: str,
+        source_path: str,
+        source_url: str | None = None,
+        default_ref: str | None = None,
+        deploy_mode: str = "manual",
+        deploy_source: str | None = None,
+        deploy_pattern: str | None = None,
+        deploy_pattern_type: str | None = None,
+    ) -> EnvironmentProjectRecord:
+        if source_type not in {"git", "local"}:
+            raise ValueError("source_type must be git or local")
+        self.require_environment_profile(environment)
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO environment_projects(
+                    environment, name, source_type, source_url, source_path, default_ref,
+                    deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
+                    env_vars_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
+                """,
+                (
+                    environment,
+                    name,
+                    source_type,
+                    source_url,
+                    source_path,
+                    default_ref,
+                    deploy_mode,
+                    deploy_source,
+                    deploy_pattern,
+                    deploy_pattern_type,
+                    now,
+                    now,
+                ),
+            )
+        return self.require_project(environment, name)
+
+    def list_projects(self, environment: str | None = None) -> list[EnvironmentProjectRecord]:
+        where = ""
+        params: list[object] = []
+        if environment is not None:
+            where = "WHERE environment = ?"
+            params.append(environment)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, environment, name, source_type, source_url, source_path, default_ref,
+                       deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
+                       env_vars_json, current_version, current_ref, current_commit,
+                       last_deployment_id, created_at, updated_at
+                FROM environment_projects
+                {where}
+                ORDER BY environment, name
+                """,
+                params,
+            ).fetchall()
+        return [_environment_project_record(row) for row in rows]
+
+    def get_project(self, environment: str, name: str) -> EnvironmentProjectRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, environment, name, source_type, source_url, source_path, default_ref,
+                       deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
+                       env_vars_json, current_version, current_ref, current_commit,
+                       last_deployment_id, created_at, updated_at
+                FROM environment_projects
+                WHERE environment = ? AND name = ?
+                """,
+                (environment, name),
+            ).fetchone()
+        return _environment_project_record(row) if row else None
+
+    def require_project(self, environment: str, name: str) -> EnvironmentProjectRecord:
+        project = self.get_project(environment, name)
+        if project is None:
+            raise KeyError(f"{environment}:{name}")
+        return project
+
+    def remove_project(self, environment: str, name: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM environment_projects WHERE environment = ? AND name = ?",
+                (environment, name),
+            )
+            return cursor.rowcount > 0
+
+    def set_project_env_var(self, environment: str, name: str, key: str, value: str) -> EnvironmentProjectRecord:
+        project = self.require_project(environment, name)
+        env_vars = dict(project.env_vars)
+        env_vars[key] = value
+        self._update_project_env_vars(project.id, env_vars)
+        return self.require_project(environment, name)
+
+    def unset_project_env_var(self, environment: str, name: str, key: str) -> EnvironmentProjectRecord:
+        project = self.require_project(environment, name)
+        env_vars = dict(project.env_vars)
+        env_vars.pop(key, None)
+        self._update_project_env_vars(project.id, env_vars)
+        return self.require_project(environment, name)
+
+    def update_project_source_state(
+        self,
+        environment: str,
+        name: str,
+        version: str | None,
+        ref: str | None,
+        commit_hash: str | None,
+    ) -> None:
+        project = self.require_project(environment, name)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE environment_projects
+                SET current_version = ?, current_ref = ?, current_commit = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (version, ref, commit_hash, _now(), project.id),
+            )
+
+    def update_project_version(
+        self,
+        environment: str,
+        name: str,
+        deployment_id: int,
+        version: str | None,
+        ref: str | None,
+        commit_hash: str | None,
+    ) -> None:
+        project = self.require_project(environment, name)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE environment_projects
+                SET current_version = ?, current_ref = ?, current_commit = ?,
+                    last_deployment_id = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (version, ref, commit_hash, deployment_id, _now(), project.id),
+            )
+
+    def add_component(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        mode: str = "compose",
+        compose_service: str | None = None,
+        build_context: str | None = None,
+        dockerfile: str | None = None,
+        image: str | None = None,
+        command: str | None = None,
+        port: int | None = None,
+        env_vars: dict[str, str] | None = None,
+    ) -> ProjectComponentRecord:
+        project_record = self.require_project(environment, project)
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO project_components(
+                    project_id, name, mode, compose_service, build_context, dockerfile,
+                    image, command, port, env_vars_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_record.id,
+                    name,
+                    mode,
+                    compose_service,
+                    build_context,
+                    dockerfile,
+                    image,
+                    command,
+                    port,
+                    json.dumps(env_vars or {}, sort_keys=True),
+                    now,
+                    now,
+                ),
+            )
+        return self.require_component(environment, project, name)
+
+    def list_components(self, environment: str, project: str) -> list[ProjectComponentRecord]:
+        project_record = self.require_project(environment, project)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, project_id, name, mode, compose_service, build_context, dockerfile,
+                       image, command, port, env_vars_json, created_at, updated_at
+                FROM project_components
+                WHERE project_id = ?
+                ORDER BY name
+                """,
+                (project_record.id,),
+            ).fetchall()
+        return [_project_component_record(row) for row in rows]
+
+    def get_component(self, environment: str, project: str, name: str) -> ProjectComponentRecord | None:
+        project_record = self.require_project(environment, project)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, project_id, name, mode, compose_service, build_context, dockerfile,
+                       image, command, port, env_vars_json, created_at, updated_at
+                FROM project_components
+                WHERE project_id = ? AND name = ?
+                """,
+                (project_record.id, name),
+            ).fetchone()
+        return _project_component_record(row) if row else None
+
+    def require_component(self, environment: str, project: str, name: str) -> ProjectComponentRecord:
+        component = self.get_component(environment, project, name)
+        if component is None:
+            raise KeyError(f"{environment}:{project}:{name}")
+        return component
+
+    def add_endpoint(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        component: str,
+        port: int,
+        host: str | None = None,
+        subdomain: str | None = None,
+        path_prefix: str | None = None,
+        auth: str = "none",
+        middlewares: tuple[str, ...] = (),
+        healthcheck_path: str | None = None,
+    ) -> ProjectEndpointRecord:
+        project_record = self.require_project(environment, project)
+        self.require_component(environment, project, component)
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO project_endpoints(
+                    project_id, name, component, port, host, subdomain, path_prefix, auth,
+                    middlewares_json, healthcheck_path, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_record.id,
+                    name,
+                    component,
+                    port,
+                    host,
+                    subdomain,
+                    path_prefix,
+                    auth,
+                    json.dumps(list(middlewares)),
+                    healthcheck_path,
+                    now,
+                    now,
+                ),
+            )
+        return self.require_endpoint(environment, project, name)
+
+    def list_endpoints(self, environment: str, project: str) -> list[ProjectEndpointRecord]:
+        project_record = self.require_project(environment, project)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, project_id, name, component, port, host, subdomain, path_prefix,
+                       auth, middlewares_json, healthcheck_path, created_at, updated_at
+                FROM project_endpoints
+                WHERE project_id = ?
+                ORDER BY name
+                """,
+                (project_record.id,),
+            ).fetchall()
+        return [_project_endpoint_record(row) for row in rows]
+
+    def get_endpoint(self, environment: str, project: str, name: str) -> ProjectEndpointRecord | None:
+        project_record = self.require_project(environment, project)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, project_id, name, component, port, host, subdomain, path_prefix,
+                       auth, middlewares_json, healthcheck_path, created_at, updated_at
+                FROM project_endpoints
+                WHERE project_id = ? AND name = ?
+                """,
+                (project_record.id, name),
+            ).fetchone()
+        return _project_endpoint_record(row) if row else None
+
+    def require_endpoint(self, environment: str, project: str, name: str) -> ProjectEndpointRecord:
+        endpoint = self.get_endpoint(environment, project, name)
+        if endpoint is None:
+            raise KeyError(f"{environment}:{project}:{name}")
+        return endpoint
+
+    def add_dependency(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        type: str,
+        target: str,
+        outputs: dict[str, str] | None = None,
+    ) -> ProjectDependencyRecord:
+        project_record = self.require_project(environment, project)
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO project_dependencies(
+                    project_id, name, type, target, outputs_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (project_record.id, name, type, target, json.dumps(outputs or {}, sort_keys=True), now, now),
+            )
+        return self.require_dependency(environment, project, name)
+
+    def list_dependencies(self, environment: str, project: str) -> list[ProjectDependencyRecord]:
+        project_record = self.require_project(environment, project)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, project_id, name, type, target, outputs_json, created_at, updated_at
+                FROM project_dependencies
+                WHERE project_id = ?
+                ORDER BY name
+                """,
+                (project_record.id,),
+            ).fetchall()
+        return [_project_dependency_record(row) for row in rows]
+
+    def get_dependency(self, environment: str, project: str, name: str) -> ProjectDependencyRecord | None:
+        project_record = self.require_project(environment, project)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, project_id, name, type, target, outputs_json, created_at, updated_at
+                FROM project_dependencies
+                WHERE project_id = ? AND name = ?
+                """,
+                (project_record.id, name),
+            ).fetchone()
+        return _project_dependency_record(row) if row else None
+
+    def require_dependency(self, environment: str, project: str, name: str) -> ProjectDependencyRecord:
+        dependency = self.get_dependency(environment, project, name)
+        if dependency is None:
+            raise KeyError(f"{environment}:{project}:{name}")
+        return dependency
 
     def list_environments(self, service_name: str) -> list[EnvironmentRecord]:
         with self._connect() as conn:
@@ -552,6 +983,17 @@ class StateStore:
                 (json.dumps(env_vars, sort_keys=True), _now(), environment_id),
             )
 
+    def _update_project_env_vars(self, project_id: int, env_vars: dict[str, str]) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE environment_projects
+                SET env_vars_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (json.dumps(env_vars, sort_keys=True), _now(), project_id),
+            )
+
     def _init_schema(self) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -702,6 +1144,98 @@ class StateStore:
                 ON deployment_jobs(service, id)
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS environment_projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    environment TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_url TEXT,
+                    source_path TEXT NOT NULL,
+                    default_ref TEXT,
+                    deploy_mode TEXT NOT NULL DEFAULT 'manual',
+                    deploy_source TEXT,
+                    deploy_pattern TEXT,
+                    deploy_pattern_type TEXT,
+                    env_vars_json TEXT NOT NULL DEFAULT '{}',
+                    current_version TEXT,
+                    current_ref TEXT,
+                    current_commit TEXT,
+                    last_deployment_id INTEGER,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(environment, name),
+                    FOREIGN KEY(environment) REFERENCES environment_profiles(name) ON DELETE RESTRICT,
+                    FOREIGN KEY(last_deployment_id) REFERENCES deployments(id) ON DELETE SET NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_environment_projects_environment_name
+                ON environment_projects(environment, name)
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS project_components (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    mode TEXT NOT NULL DEFAULT 'compose',
+                    compose_service TEXT,
+                    build_context TEXT,
+                    dockerfile TEXT,
+                    image TEXT,
+                    command TEXT,
+                    port INTEGER,
+                    env_vars_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(project_id, name),
+                    FOREIGN KEY(project_id) REFERENCES environment_projects(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS project_endpoints (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    component TEXT NOT NULL,
+                    port INTEGER NOT NULL,
+                    host TEXT,
+                    subdomain TEXT,
+                    path_prefix TEXT,
+                    auth TEXT NOT NULL DEFAULT 'none',
+                    middlewares_json TEXT NOT NULL DEFAULT '[]',
+                    healthcheck_path TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(project_id, name),
+                    FOREIGN KEY(project_id) REFERENCES environment_projects(id) ON DELETE CASCADE,
+                    FOREIGN KEY(project_id, component) REFERENCES project_components(project_id, name) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS project_dependencies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    outputs_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(project_id, name),
+                    FOREIGN KEY(project_id) REFERENCES environment_projects(id) ON DELETE CASCADE
+                )
+                """
+            )
 
 
 def _now() -> str:
@@ -745,6 +1279,78 @@ def _environment_record(row) -> EnvironmentRecord:
         last_deployment_id=row[13],
         created_at=row[14],
         updated_at=row[15],
+    )
+
+
+def _environment_project_record(row) -> EnvironmentProjectRecord:
+    return EnvironmentProjectRecord(
+        id=row[0],
+        environment=row[1],
+        name=row[2],
+        source_type=row[3],
+        source_url=row[4],
+        source_path=row[5],
+        default_ref=row[6],
+        deploy_mode=row[7] or "manual",
+        deploy_source=row[8],
+        deploy_pattern=row[9],
+        deploy_pattern_type=row[10],
+        env_vars=json.loads(row[11] or "{}"),
+        current_version=row[12],
+        current_ref=row[13],
+        current_commit=row[14],
+        last_deployment_id=row[15],
+        created_at=row[16],
+        updated_at=row[17],
+    )
+
+
+def _project_component_record(row) -> ProjectComponentRecord:
+    return ProjectComponentRecord(
+        id=row[0],
+        project_id=row[1],
+        name=row[2],
+        mode=row[3],
+        compose_service=row[4],
+        build_context=row[5],
+        dockerfile=row[6],
+        image=row[7],
+        command=row[8],
+        port=row[9],
+        env_vars=json.loads(row[10] or "{}"),
+        created_at=row[11],
+        updated_at=row[12],
+    )
+
+
+def _project_endpoint_record(row) -> ProjectEndpointRecord:
+    return ProjectEndpointRecord(
+        id=row[0],
+        project_id=row[1],
+        name=row[2],
+        component=row[3],
+        port=row[4],
+        host=row[5],
+        subdomain=row[6],
+        path_prefix=row[7],
+        auth=row[8],
+        middlewares=tuple(json.loads(row[9] or "[]")),
+        healthcheck_path=row[10],
+        created_at=row[11],
+        updated_at=row[12],
+    )
+
+
+def _project_dependency_record(row) -> ProjectDependencyRecord:
+    return ProjectDependencyRecord(
+        id=row[0],
+        project_id=row[1],
+        name=row[2],
+        type=row[3],
+        target=row[4],
+        outputs=json.loads(row[5] or "{}"),
+        created_at=row[6],
+        updated_at=row[7],
     )
 
 
