@@ -69,8 +69,8 @@
 - [x] Add project list screen.
 - [x] Add deployment history screen.
 - [x] Add deploy action and log viewer.
-- [x] Redesign UI around explicit runtime targets: `service/prod` and `service/dev`.
-- [x] Replace service cards with a runtime-target-first service table/list.
+- [x] Redesign UI around explicit runtime targets.
+- [x] Replace service cards with an environment-first service table/list.
 - [x] Add `RuntimeCard(service, environment)` with scoped Deploy/Restart/Stop/Down/Logs/Env/History actions.
 - [x] Remove mixed service-level runtime actions from the UI.
 - [x] Replace deploy prompt with runtime-scoped deploy modal.
@@ -78,6 +78,8 @@
 - [x] Add global Jobs page with service/environment filters.
 - [x] Add override preview and validation errors.
 - [x] Add persistent UI filters/search and better empty/error states.
+- [x] Stop auto-creating `prod/dev` runtime targets for every new service.
+- [x] Add environment-first UI navigation and attach flow.
 - [ ] Add mobile navigation for small screens.
 
 ## Runtime Targets v2

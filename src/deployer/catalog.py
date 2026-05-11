@@ -244,12 +244,18 @@ class ServiceCatalog:
         _validate_env_key(key)
         if "\n" in value:
             raise CatalogError("Environment values must be single-line")
-        return self.state.set_env_var(service_name, environment, key, value)
+        try:
+            return self.state.set_env_var(service_name, environment, key, value)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown service environment: {service_name}/{environment}") from exc
 
     def unset_env(self, service_name: str, environment: str, key: str) -> EnvironmentRecord:
         _validate_target_name(environment)
         _validate_env_key(key)
-        return self.state.unset_env_var(service_name, environment, key)
+        try:
+            return self.state.unset_env_var(service_name, environment, key)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown service environment: {service_name}/{environment}") from exc
 
     def list_environments(self, service_name: str) -> list[EnvironmentRecord]:
         self.get_service(service_name)

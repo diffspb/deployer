@@ -140,6 +140,10 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.nav-label.top-gap {
+  margin-top: 14px;
+}
+
 .nav-item {
   align-items: center;
   background: transparent;
@@ -180,6 +184,12 @@ button:disabled {
 
 .tree-indent {
   width: 12px;
+}
+
+.nav-empty {
+  color: var(--fg-subtle);
+  font-size: 12px;
+  padding: 6px 12px 8px 28px;
 }
 
 .service-list {
@@ -518,6 +528,12 @@ button:disabled {
   min-width: 1180px;
 }
 
+.environment-services-head,
+.environment-services-row {
+  grid-template-columns: 1.25fr 1.45fr 1.2fr 1fr 210px 110px;
+  min-width: 1060px;
+}
+
 .jobs-table-head,
 .jobs-table-row {
   grid-template-columns: 1.05fr 96px 132px 72px 1fr 170px 92px;
@@ -640,6 +656,21 @@ button:disabled {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.unassigned-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.environment-section {
+  margin-bottom: 16px;
+}
+
+.compact-form {
+  margin: 0;
+  min-width: 320px;
 }
 
 .runtime-mini-card {
@@ -882,6 +913,7 @@ button:disabled {
 @media (max-width: 1100px) {
   .details-grid,
   .runtime-mini-grid,
+  .unassigned-grid,
   .runtime-page-grid,
   .preview-meta,
   .preview-grid {

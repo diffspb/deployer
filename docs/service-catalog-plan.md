@@ -385,25 +385,29 @@ The operator may create fewer targets, more targets, or differently named
 targets. Webhook matching and deployment policy are properties of each runtime
 target, not of a predefined environment type.
 
-## Near-Term Refactor Goal
+## Current Refactor Goal
 
-The codebase currently hardcodes `prod/dev` in API validation, catalog validation, URL generation assumptions, tests, and UI rendering loops. The next implementation phase must replace that fixed enum with a dynamic runtime target model loaded from state.
+The codebase must use an environment-first mental model. A service is first registered in the catalog as a shared
+source definition. It becomes deployable only after the operator explicitly attaches it to one or more environment
+profiles. Creating a new service must not create `prod`, `dev`, or any other runtime target automatically.
 
-That refactor should preserve one important invariant:
+This refactor should preserve these invariants:
 
 - runtime actions are always scoped to `service + runtime-target`
 - shared service data remains separate from runtime-target data
+- environment pages list only services explicitly attached to that environment
+- service pages show shared source settings and the attached environments
 - UI never constructs deploy logic itself; it only configures or triggers backend workflows
 
 ### Immediate Redesign Tasks
 
-1. Replace dashboard cards with a runtime-target-first service table/list.
-2. Introduce a `RuntimeCard(service, environment)` UI component.
+1. Replace dashboard cards with an environment-first service table/list.
+2. Make the sidebar show environments first and services under each environment.
 3. Remove service-level runtime action groups.
 4. Make deploy modal accept fixed `service + environment`; do not choose environment inside it.
 5. Open env editor directly for a fixed runtime target; remove the global env selector.
 6. Filter jobs, history, status, and logs by `service + environment` everywhere in the UI.
-7. Add global `Jobs` page after runtime actions are no longer mixed.
+7. Add an attach flow so a catalog service can be added to an environment explicitly.
 
 ## Implementation Order
 

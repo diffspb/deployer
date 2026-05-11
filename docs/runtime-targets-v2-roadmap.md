@@ -254,12 +254,14 @@ Work:
   - `deploy_pattern`
   - `deploy_pattern_type`
   - candidate metadata
-- keep existing `prod` and `dev` as migrated defaults for current services
+- keep existing `prod` and `dev` attachments for current services during migration
+- do not auto-create any runtime target for newly added services
 - make `history`, `status`, `logs`, `env`, and `deploy` work with arbitrary target names
 
 Acceptance:
 
 - service may have any number of runtime targets
+- newly added services start as catalog entries until explicitly attached to an environment
 - arbitrary target names can be created without code changes
 - no webhook behavior yet
 
@@ -287,13 +289,14 @@ Acceptance:
 
 Goal:
 
-- make runtime targets first-class in API and UI
+- make runtime targets first-class in API and UI using an environment-first layout
 
 Work:
 
 - replace fixed `prod/dev` validation in API
 - add runtime target CRUD endpoints
-- change UI lists, filters, sidebar, detail pages, and deploy modal to render dynamic target collections
+- change UI lists, filters, sidebar, detail pages, and deploy modal to render environments containing services
+- add an explicit attach flow from service catalog entry to environment
 - add target settings page:
   - URL prefix
   - deploy mode

@@ -49,13 +49,13 @@ Current implementation includes the deployer engine and the first service catalo
 - Command logging.
 - Optional healthcheck.
 - CLI suitable for later reuse by FastAPI UI.
-- Environment-aware prod/dev deployment.
+- Environment-aware deployment with operator-defined environment profiles.
 - Stop, down, restart, status, and logs commands.
 - Service catalog with `git` and `local` sources.
 - Managed runtime layout under `/var/lib/deployer/services/<name>/`.
 - Environment variable storage and generated env files.
-- FastAPI JSON API and a minimal Web UI.
-- Global environment profiles with per-service runtime targets.
+- FastAPI JSON API and Web UI.
+- Global environment profiles with explicitly attached services.
 
 Catalog workflow:
 
@@ -64,6 +64,7 @@ deployer services add myapp --git-url <url> --state-db /var/lib/deployer/state.d
 deployer services add-local myapp --path /path/to/project --state-db /var/lib/deployer/state.db
 deployer environments add stage --url-prefix stage --state-db /var/lib/deployer/state.db
 deployer environments update dev --deploy-mode webhook_auto --deploy-source branch --deploy-pattern dev --pattern-type exact --state-db /var/lib/deployer/state.db
+deployer runtime-targets add myapp prod --state-db /var/lib/deployer/state.db
 deployer runtime-targets add myapp stage --state-db /var/lib/deployer/state.db
 deployer runtime-targets list myapp --state-db /var/lib/deployer/state.db
 deployer env set myapp prod KEY=value --state-db /var/lib/deployer/state.db
@@ -84,8 +85,9 @@ Web UI:
 make api
 ```
 
-Open `http://127.0.0.1:8000/`. The UI uses the same API contract as external clients and can add services,
-edit environment variables, run deploy/stop/down/restart jobs, poll job status, and inspect recent logs.
+Open `http://127.0.0.1:8000/`. The UI uses the same API contract as external clients. It is organized
+environment-first: create/register services in the catalog, attach them to explicit environments, then edit env
+variables, run deploy/stop/down/restart jobs, poll job status, and inspect recent logs for that environment service.
 
 ## Server Runbook
 

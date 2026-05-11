@@ -118,7 +118,12 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
 
     @app.get("/api/environments")
     def list_environment_profiles(catalog: CatalogDep) -> dict:
-        return {"environments": [_environment_profile_payload(profile) for profile in catalog.list_environment_profiles()]}
+        return {
+            "environments": [
+                _environment_profile_payload(profile, services=_services_for_environment(catalog, profile.name))
+                for profile in catalog.list_environment_profiles()
+            ]
+        }
 
     @app.post("/api/environments", status_code=201)
     def add_environment_profile(payload: EnvironmentProfileRequest, catalog: CatalogDep) -> dict:
@@ -130,7 +135,17 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
             deploy_pattern=payload.deploy_pattern,
             deploy_pattern_type=payload.deploy_pattern_type,
         )
-        return {"environment": _environment_profile_payload(profile)}
+        return {"environment": _environment_profile_payload(profile, services=[])}
+
+    @app.get("/api/environments/{environment}/services")
+    def list_environment_services(environment: str, catalog: CatalogDep) -> dict:
+        profile = catalog.get_environment_profile(environment)
+        return {
+            "environment": _environment_profile_payload(
+                profile,
+                services=_services_for_environment(catalog, environment),
+            )
+        }
 
     @app.patch("/api/environments/{environment}")
     def update_environment_profile(
@@ -146,7 +161,12 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
             deploy_pattern=payload.deploy_pattern,
             deploy_pattern_type=payload.deploy_pattern_type,
         )
-        return {"environment": _environment_profile_payload(profile)}
+        return {
+            "environment": _environment_profile_payload(
+                profile,
+                services=_services_for_environment(catalog, environment),
+            )
+        }
 
     @app.delete("/api/environments/{environment}")
     def delete_environment_profile(environment: str, catalog: CatalogDep) -> dict:
@@ -322,8 +342,8 @@ def _environment_payload(env: EnvironmentRecord, public_url: str | None = None) 
     }
 
 
-def _environment_profile_payload(profile: EnvironmentProfileRecord) -> dict:
-    return {
+def _environment_profile_payload(profile: EnvironmentProfileRecord, services: list[dict] | None = None) -> dict:
+    payload = {
         "name": profile.name,
         "url_prefix": profile.url_prefix,
         "deploy_mode": profile.deploy_mode,
@@ -333,6 +353,25 @@ def _environment_profile_payload(profile: EnvironmentProfileRecord) -> dict:
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
     }
+    if services is not None:
+        payload["services"] = services
+    return payload
+
+
+def _services_for_environment(catalog: ServiceCatalog, environment: str) -> list[dict]:
+    services = []
+    for service in catalog.list_services():
+        env = catalog.state.get_environment(service.name, environment)
+        if env is None:
+            continue
+        manifest = _load_service_manifest(service)
+        services.append(
+            {
+                **_service_payload(service),
+                "runtime": _environment_payload(env, public_url=_public_url_for(manifest, env)),
+            }
+        )
+    return services
 
 
 def _service_detail(catalog: ServiceCatalog, name: str) -> dict:

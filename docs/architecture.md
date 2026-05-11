@@ -47,6 +47,7 @@ deployer environments add stage --url-prefix stage
 deployer environments update dev --deploy-mode webhook_auto --deploy-source branch --deploy-pattern dev --pattern-type exact
 deployer environments remove stage
 deployer runtime-targets list myapp
+deployer runtime-targets add myapp prod
 deployer runtime-targets add myapp stage
 deployer runtime-targets remove myapp stage
 deployer env list myapp prod
@@ -118,10 +119,12 @@ Path mode:
 8. Mark deployment as `success` or `failed`.
 9. Persist command log.
 
-Environment profiles are global platform-level definitions. `prod` and `dev` are created as defaults for existing
-workflows, but operators can create additional profiles such as `stage`, `preview-123`, or project-specific names.
+Environment profiles are global platform-level definitions. `prod` and `dev` are created as default profile
+definitions for existing workflows, but operators can create additional profiles such as `stage`, `preview-123`,
+or project-specific names.
 
-Service runtime targets are per-service enablements of these profiles. They store runtime state such as env vars,
+Service runtime targets are explicit per-service attachments to these profiles. Creating a service only registers
+its source in the catalog; it is not deployable until attached to an environment. Runtime targets store env vars,
 current ref/commit, last deployment, jobs, and logs.
 
 Routing uses the profile `url_prefix`:

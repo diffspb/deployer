@@ -214,23 +214,13 @@ class StateStore:
             raise ValueError("source_type must be git or local")
         now = _now()
         with self._connect() as conn:
-            cursor = conn.execute(
+            conn.execute(
                 """
                 INSERT INTO services(name, source_type, source_url, source_path, default_branch, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (name, source_type, source_url, source_path, default_branch, now, now),
             )
-            service_id = int(cursor.lastrowid)
-            for environment in ("prod", "dev"):
-                _ensure_environment_profile(conn, environment, _default_url_prefix(environment), now)
-                conn.execute(
-                    """
-                    INSERT INTO environments(service_id, name, subdomain, env_vars_json, created_at, updated_at)
-                    VALUES (?, ?, ?, '{}', ?, ?)
-                    """,
-                    (service_id, environment, name, now, now),
-                )
         return self.require_service(name)
 
     def list_services(self) -> list[ServiceRecord]:

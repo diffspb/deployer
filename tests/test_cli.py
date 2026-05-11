@@ -90,6 +90,23 @@ def test_cli_service_catalog_local_workflow(tmp_path: Path, capsys):
     assert (
         main(
             [
+                "runtime-targets",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "add",
+                "myapp",
+                "prod",
+            ]
+        )
+        == 0
+    )
+    assert "added\tmyapp\tprod" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
                 "env",
                 "--state-db",
                 str(state_db),

@@ -54,7 +54,10 @@ def test_api_service_local_env_deploy_history_and_delete(tmp_path: Path):
     )
     assert response.status_code == 201
     assert response.json()["name"] == "myapp"
-    assert response.json()["environments"][0]["name"] == "prod"
+    assert response.json()["environments"] == []
+
+    assert client.post("/api/services/myapp/runtime-targets", json={"name": "prod"}).status_code == 201
+    assert client.post("/api/services/myapp/runtime-targets", json={"name": "dev"}).status_code == 201
 
     assert client.get("/api/services").json()[0]["name"] == "myapp"
     detail = client.get("/api/services/myapp").json()
@@ -63,6 +66,13 @@ def test_api_service_local_env_deploy_history_and_delete(tmp_path: Path):
     assert detail["source_status"]["path_exists"] is True
     assert detail["environments"][0]["public_url"] == "https://myapp.busypage.ru/"
     assert detail["environments"][1]["public_url"] == "https://myapp.dev.busypage.ru/"
+    environments = client.get("/api/environments").json()["environments"]
+    prod = next(item for item in environments if item["name"] == "prod")
+    assert prod["services"][0]["name"] == "myapp"
+    assert prod["services"][0]["runtime"]["public_url"] == "https://myapp.busypage.ru/"
+    prod_services = client.get("/api/environments/prod/services").json()["environment"]
+    assert prod_services["name"] == "prod"
+    assert prod_services["services"][0]["name"] == "myapp"
 
     response = client.post("/api/services/myapp/env/prod", json={"key": "TOKEN", "value": "abc"})
     assert response.status_code == 200
@@ -120,6 +130,7 @@ def test_api_runtime_target_crud_and_dynamic_deploy(tmp_path: Path):
         "/api/services",
         json={"name": "myapp", "source_type": "local", "path": str(project)},
     ).status_code == 201
+    assert client.post("/api/services/myapp/runtime-targets", json={"name": "prod"}).status_code == 201
 
     response = client.post(
         "/api/environments",
@@ -189,6 +200,10 @@ def test_api_validation_and_catalog_errors(tmp_path: Path):
         json={"name": "myapp", "source_type": "local", "path": str(project)},
     ).status_code == 201
 
+    response = client.post("/api/services/myapp/env/prod", json={"key": "TOKEN", "value": "abc"})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unknown service environment: myapp/prod"
+
     response = client.post(
         "/api/services",
         json={"name": "myapp", "source_type": "local", "path": str(project)},
@@ -208,6 +223,7 @@ def test_api_preview_reports_validation_errors(tmp_path: Path):
         "/api/services",
         json={"name": "myapp", "source_type": "local", "path": str(project)},
     ).status_code == 201
+    assert client.post("/api/services/myapp/runtime-targets", json={"name": "prod"}).status_code == 201
 
     (project / "docker-compose.yml").unlink()
     preview = client.get("/api/services/myapp/preview?environment=prod")

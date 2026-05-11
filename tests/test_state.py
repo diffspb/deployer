@@ -33,15 +33,16 @@ def test_state_filters_history_by_environment(tmp_path: Path):
     assert history[0].action == "stop"
 
 
-def test_state_stores_services_and_default_environments(tmp_path: Path):
+def test_state_stores_services_without_default_runtime_targets(tmp_path: Path):
     state = StateStore(tmp_path / "state.db")
 
     service = state.add_service("myapp", "local", "/srv/myapp")
 
     assert service.name == "myapp"
     assert state.list_services()[0].source_path == "/srv/myapp"
-    prod = state.require_environment("myapp", "prod")
-    dev = state.require_environment("myapp", "dev")
+    assert state.list_environments("myapp") == []
+    prod = state.add_environment("myapp", "prod")
+    dev = state.add_environment("myapp", "dev")
     assert prod.subdomain == "myapp"
     assert dev.subdomain == "myapp"
     assert prod.url_prefix == ""
@@ -53,6 +54,8 @@ def test_state_stores_services_and_default_environments(tmp_path: Path):
 def test_state_manages_dynamic_runtime_targets(tmp_path: Path):
     state = StateStore(tmp_path / "state.db")
     state.add_service("myapp", "local", "/srv/myapp")
+    state.add_environment("myapp", "prod")
+    state.add_environment("myapp", "dev")
 
     stage_profile = state.add_environment_profile(
         "stage",
@@ -89,6 +92,7 @@ def test_state_manages_dynamic_runtime_targets(tmp_path: Path):
 def test_state_updates_environment_vars_and_version(tmp_path: Path):
     state = StateStore(tmp_path / "state.db")
     state.add_service("myapp", "git", "/srv/myapp", source_url="git@example.com/myapp.git")
+    state.add_environment("myapp", "prod")
 
     state.set_env_var("myapp", "prod", "TOKEN", "abc")
     state.set_env_var("myapp", "prod", "PORT", "8000")
@@ -108,6 +112,7 @@ def test_state_updates_environment_vars_and_version(tmp_path: Path):
 def test_state_updates_environment_source_state_without_successful_deployment(tmp_path: Path):
     state = StateStore(tmp_path / "state.db")
     state.add_service("myapp", "local", "/tmp/myapp")
+    state.add_environment("myapp", "prod")
 
     state.update_environment_source_state("myapp", "prod", "main", "main", "abc123")
 

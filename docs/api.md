@@ -29,6 +29,7 @@ GET    /api/services/{name}
 DELETE /api/services/{name}
 GET    /api/environments
 POST   /api/environments
+GET    /api/environments/{environment}/services
 PATCH  /api/environments/{environment}
 DELETE /api/environments/{environment}
 GET    /api/services/{name}/refs
@@ -90,7 +91,16 @@ Service detail includes source checkout status:
 }
 ```
 
-Service detail also includes all runtime targets currently stored for the service:
+New services start with no runtime targets:
+
+```json
+{
+  "name": "myapp",
+  "environments": []
+}
+```
+
+After explicit attachment, service detail includes all runtime targets currently stored for the service:
 
 ```json
 {
@@ -129,7 +139,8 @@ Service detail also includes all runtime targets currently stored for the servic
 ## Environment Profiles
 
 Environment profiles are global platform-level definitions. `prod` and `dev` are created as
-defaults for existing workflows, but the API does not restrict the profile name set.
+default profile definitions for existing workflows, but the API does not restrict the profile name set.
+Creating a service does not attach it to any profile automatically.
 
 Create:
 
@@ -176,6 +187,9 @@ Create a runtime target by referencing an existing profile:
 ```
 
 - Runtime actions, env vars, history, preview, status, and logs are always scoped to `service + environment`.
+- The UI treats an environment as the parent container and lists only services explicitly attached to it.
+- `GET /api/environments` includes a `services` array for each profile.
+- `GET /api/environments/{environment}/services` returns one profile and its attached services.
 
 ## Runtime Preview
 

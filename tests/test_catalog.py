@@ -30,6 +30,7 @@ def test_catalog_adds_local_service_and_renders_env(tmp_path: Path):
     catalog = ServiceCatalog(StateStore(tmp_path / "state.db"), runtime_dir=tmp_path / "runtime")
 
     service = catalog.add_local("myapp", project)
+    catalog.add_environment("myapp", "prod")
     catalog.set_env("myapp", "prod", "TOKEN", "abc")
     env_path = catalog.render_env_file("myapp", "prod")
 
@@ -43,6 +44,7 @@ def test_catalog_deploys_local_service_through_engine_dry_run(tmp_path: Path):
     state = StateStore(tmp_path / "state.db")
     catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
     catalog.add_local("myapp", project)
+    catalog.add_environment("myapp", "dev")
     catalog.set_env("myapp", "dev", "GREETING", "hello world")
     engine = DeploymentEngine(state)
 
@@ -64,6 +66,7 @@ def test_catalog_history_includes_environment_summary(tmp_path: Path):
     state = StateStore(tmp_path / "state.db")
     catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
     catalog.add_local("myapp", project)
+    catalog.add_environment("myapp", "prod")
     engine = DeploymentEngine(state)
     result = catalog.deploy("myapp", engine, environment="prod", ref="main", dry_run=True)
 
@@ -134,6 +137,7 @@ def test_catalog_runtime_commands_local_service(tmp_path: Path):
     state = StateStore(tmp_path / "state.db")
     catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
     catalog.add_local("myapp", project)
+    catalog.add_environment("myapp", "prod")
 
     class Runner:
         def run(self, args, cwd, env=None):
@@ -197,6 +201,7 @@ def test_catalog_git_source_uses_runner_for_clone_refs_and_checkout(tmp_path: Pa
     engine = DeploymentEngine(state)
 
     service = catalog.add_git("myapp", "git@example.com/myapp.git", default_branch="main")
+    catalog.add_environment("myapp", "prod")
     refs = catalog.refs("myapp")
     status = catalog.source_status("myapp")
     result = catalog.deploy("myapp", engine, environment="prod", dry_run=True)
@@ -242,6 +247,7 @@ def test_catalog_records_checked_out_source_state_when_deploy_fails(tmp_path: Pa
     state = StateStore(tmp_path / "state.db")
     catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime", runner=GitRunner())
     catalog.add_git("myapp", "git@example.com/myapp.git", default_branch="main")
+    catalog.add_environment("myapp", "prod")
 
     result = catalog.deploy("myapp", DeploymentEngine(state, runner=FailingRunner()), environment="prod")
 
@@ -282,6 +288,7 @@ def test_catalog_checkout_prefers_remote_branch_head_when_local_branch_is_stale(
     engine = DeploymentEngine(state)
 
     catalog.add_git("myapp", "git@example.com/myapp.git", default_branch="main")
+    catalog.add_environment("myapp", "dev")
     result = catalog.deploy("myapp", engine, environment="dev", ref="dev", dry_run=True)
 
     assert result.status == "success"
@@ -314,6 +321,7 @@ def test_catalog_git_source_with_real_local_bare_repository(tmp_path: Path):
     state = StateStore(tmp_path / "state.db")
     catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
     service = catalog.add_git("myapp", str(bare), default_branch=default_branch)
+    catalog.add_environment("myapp", "prod")
     refs = catalog.refs("myapp")
     result = catalog.deploy("myapp", DeploymentEngine(state), environment="prod", ref="v1", dry_run=True)
 
