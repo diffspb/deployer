@@ -21,6 +21,10 @@ const state = {
 
 const root = document.getElementById("deployer-root");
 document.documentElement.dataset.theme = state.theme;
+const ACTION_MENU_WIDTH = 180;
+const ACTION_MENU_HEIGHT = 240;
+const ACTION_MENU_GAP = 6;
+const ACTION_MENU_VIEWPORT_PADDING = 8;
 
 const icons = {
   plus: "M12 4v16m-8-8h16",
@@ -321,6 +325,7 @@ function render() {
           ${renderCurrentView()}
         </section>
       </main>
+      ${state.actionMenu ? renderActionMenuOverlay() : ""}
       ${state.logsDrawer ? renderLogsDrawer() : ""}
       ${state.historyDrawer ? renderHistoryDrawer() : ""}
       ${state.jobDrawer ? renderJobDrawer() : ""}
@@ -455,10 +460,6 @@ function renderServiceTableRow(service, environment) {
   const visibleFailure = latestVisibleFailure(service.name, environment);
   const canOpenLink = summary.running;
   const publicUrl = runtimeUrl(service.name, environment);
-  const menuOpen =
-    state.actionMenu &&
-    state.actionMenu.service === service.name &&
-    state.actionMenu.environment === environment;
   return `
     <div class="table-row services-table-row">
       <div class="service-cell">
@@ -486,16 +487,22 @@ function renderServiceTableRow(service, environment) {
         <button class="btn ghost" onclick="openRuntimePage('${escapeHtml(service.name)}', '${environment}')">Settings</button>
       </div>
       <div class="action-menu-wrap">
-        <button class="btn secondary" onclick="toggleActionMenu('${escapeHtml(service.name)}', '${environment}')">${icon("more")} Actions</button>
-        ${menuOpen ? renderActionMenu(service.name, environment) : ""}
+        <button class="btn secondary" onclick="toggleActionMenu(event, '${escapeHtml(service.name)}', '${environment}')">${icon("more")} Actions</button>
       </div>
     </div>
   `;
 }
 
-function renderActionMenu(serviceName, environment) {
+function renderActionMenuOverlay() {
   return `
-    <div class="action-menu">
+    <button class="action-menu-backdrop" onclick="closeActionMenu()" aria-label="Close actions menu"></button>
+    ${renderActionMenu(state.actionMenu.service, state.actionMenu.environment, state.actionMenu.top, state.actionMenu.left)}
+  `;
+}
+
+function renderActionMenu(serviceName, environment, top, left) {
+  return `
+    <div class="action-menu action-menu-floating" style="top:${top}px;left:${left}px">
       <button class="action-item" onclick="openDeployModal('${escapeHtml(serviceName)}', '${environment}')">Deploy</button>
       <button class="action-item" onclick="runtimeAction('${escapeHtml(serviceName)}', 'restart', '${environment}')">Restart</button>
       <button class="action-item" onclick="runtimeAction('${escapeHtml(serviceName)}', 'stop', '${environment}')">Stop</button>
@@ -966,11 +973,30 @@ function setJobsFilter(key, value) {
   render();
 }
 
-function toggleActionMenu(service, environment) {
+function actionMenuPosition(trigger) {
+  const rect = trigger.getBoundingClientRect();
+  const maxLeft = window.innerWidth - ACTION_MENU_WIDTH - ACTION_MENU_VIEWPORT_PADDING;
+  const left = Math.max(ACTION_MENU_VIEWPORT_PADDING, Math.min(rect.right - ACTION_MENU_WIDTH, maxLeft));
+  const openAbove = rect.bottom + ACTION_MENU_GAP + ACTION_MENU_HEIGHT > window.innerHeight - ACTION_MENU_VIEWPORT_PADDING;
+  const top = openAbove
+    ? Math.max(ACTION_MENU_VIEWPORT_PADDING, rect.top - ACTION_MENU_HEIGHT - ACTION_MENU_GAP)
+    : Math.min(rect.bottom + ACTION_MENU_GAP, window.innerHeight - ACTION_MENU_HEIGHT - ACTION_MENU_VIEWPORT_PADDING);
+  return { top, left };
+}
+
+function closeActionMenu() {
+  if (!state.actionMenu) return;
+  state.actionMenu = null;
+  render();
+}
+
+function toggleActionMenu(event, service, environment) {
   if (state.actionMenu && state.actionMenu.service === service && state.actionMenu.environment === environment) {
     state.actionMenu = null;
   } else {
-    state.actionMenu = { service, environment };
+    const trigger = event?.currentTarget;
+    if (!trigger) return;
+    state.actionMenu = { service, environment, ...actionMenuPosition(trigger) };
   }
   render();
 }

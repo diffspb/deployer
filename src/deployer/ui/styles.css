@@ -590,6 +590,21 @@ button:disabled {
   z-index: 20;
 }
 
+.action-menu-floating {
+  min-width: 180px;
+  position: fixed;
+  z-index: 26;
+}
+
+.action-menu-backdrop {
+  background: transparent;
+  border: 0;
+  inset: 0;
+  padding: 0;
+  position: fixed;
+  z-index: 25;
+}
+
 .action-item {
   background: transparent;
   border: 0;
