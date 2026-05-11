@@ -77,8 +77,28 @@
 - [x] Make env editor scoped to one runtime target and remove the global env selector.
 - [x] Add global Jobs page with service/environment filters.
 - [x] Add override preview and validation errors.
-- [ ] Add persistent UI filters/search and better empty/error states.
+- [x] Add persistent UI filters/search and better empty/error states.
 - [ ] Add mobile navigation for small screens.
+
+## Runtime Targets v2
+
+- [ ] Replace fixed `prod/dev` environment model with dynamic runtime targets loaded from state.
+- [ ] Add CRUD operations for runtime targets: create, update, delete.
+- [ ] Add per-target `url_prefix` instead of hardcoded `prod/dev` host logic.
+- [ ] Add per-target deploy policy fields: `deploy_mode`, `deploy_source`, `deploy_pattern`, `deploy_pattern_type`.
+- [ ] Add per-target candidate fields for gated webhook deployments.
+- [ ] Generalize CLI, API, catalog, state, tests, and UI to support arbitrary target names such as `dev`, `stage`, `prod`.
+- [ ] Add GitHub webhook ingestion with HMAC validation and event audit log.
+- [ ] Implement webhook rule matching for branch-based deployments.
+- [ ] Implement webhook rule matching for tag-based deployments.
+- [ ] Implement `webhook_auto` mode: matching event deploys immediately.
+- [ ] Implement `webhook_gated` mode: matching event updates candidate without deploying.
+- [ ] Add UI for target deploy mode and trigger configuration.
+- [ ] Add UI for candidate inspection and `Deploy Candidate`.
+- [ ] Add sample target setup:
+  - `dev` auto by branch push
+  - `stage` auto by tag regex
+  - `prod` gated by release tag regex
 
 ## Architecture Review Checklist
 
