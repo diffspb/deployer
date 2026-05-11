@@ -76,7 +76,7 @@
 - [x] Replace deploy prompt with runtime-scoped deploy modal.
 - [x] Make env editor scoped to one runtime target and remove the global env selector.
 - [x] Add global Jobs page with service/environment filters.
-- [ ] Add override preview and validation errors.
+- [x] Add override preview and validation errors.
 - [ ] Add persistent UI filters/search and better empty/error states.
 - [ ] Add mobile navigation for small screens.
 

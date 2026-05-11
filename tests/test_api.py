@@ -69,6 +69,13 @@ def test_api_service_local_env_deploy_history_and_delete(tmp_path: Path):
     assert response.json()["env"] == {"TOKEN": "abc"}
     assert client.get("/api/services/myapp/env/prod").json()["env"] == {"TOKEN": "abc"}
 
+    preview = client.get("/api/services/myapp/preview?environment=prod")
+    assert preview.status_code == 200
+    assert preview.json()["valid"] is True
+    assert preview.json()["env_file_content"] == "TOKEN=abc\n"
+    assert "traefik.enable=true" in preview.json()["override_content"]
+    assert preview.json()["compose_files"] == ["docker-compose.yml"]
+
     response = client.post(
         "/api/services/myapp/deploy",
         json={"environment": "prod", "ref": "main", "dry_run": True},
@@ -119,6 +126,26 @@ def test_api_validation_and_catalog_errors(tmp_path: Path):
 
     response = client.delete("/api/services/unknown")
     assert response.status_code == 404
+
+
+def test_api_preview_reports_validation_errors(tmp_path: Path):
+    project = _project(tmp_path / "project")
+    client = _client(tmp_path)
+
+    assert client.post(
+        "/api/services",
+        json={"name": "myapp", "source_type": "local", "path": str(project)},
+    ).status_code == 201
+
+    (project / "docker-compose.yml").unlink()
+    preview = client.get("/api/services/myapp/preview?environment=prod")
+
+    assert preview.status_code == 200
+    assert preview.json()["valid"] is False
+    assert preview.json()["override_content"] is None
+    assert preview.json()["errors"] == [
+        {"scope": "manifest", "message": "Missing compose files: docker-compose.yml"}
+    ]
 
 
 def test_api_parses_refs_payload():

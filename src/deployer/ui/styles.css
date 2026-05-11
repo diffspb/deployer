@@ -420,6 +420,17 @@ button:disabled {
   padding: 10px 12px;
 }
 
+.error-title {
+  font-weight: 760;
+  margin-bottom: 6px;
+}
+
+.error-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -657,6 +668,21 @@ button:disabled {
   margin-bottom: 14px;
 }
 
+.preview-meta,
+.preview-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.preview-meta {
+  margin-bottom: 12px;
+}
+
+.preview-panel {
+  min-width: 0;
+}
+
 .fact {
   background: var(--bg-muted);
   border: 1px solid var(--border-soft);
@@ -846,7 +872,9 @@ button:disabled {
 @media (max-width: 1100px) {
   .details-grid,
   .runtime-mini-grid,
-  .runtime-page-grid {
+  .runtime-page-grid,
+  .preview-meta,
+  .preview-grid {
     grid-template-columns: 1fr;
   }
 }

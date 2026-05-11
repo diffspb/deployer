@@ -32,6 +32,7 @@ GET    /api/services/{name}/env/{environment}
 POST   /api/services/{name}/env/{environment}
 DELETE /api/services/{name}/env/{environment}/{key}
 GET    /api/services/{name}/history
+GET    /api/services/{name}/preview
 GET    /api/jobs
 GET    /api/jobs/{job_id}
 POST   /api/services/{name}/deploy
@@ -81,6 +82,33 @@ Service detail includes source checkout status:
   }
 }
 ```
+
+## Runtime Preview
+
+`GET /api/services/{name}/preview?environment=prod` returns the current generated runtime inputs
+without starting a deploy job. The response is intended for the Web UI preflight/preview flow.
+
+Example response:
+
+```json
+{
+  "service": "myapp",
+  "environment": "prod",
+  "valid": true,
+  "errors": [],
+  "source_path": "/var/lib/deployer/services/myapp/repo",
+  "manifest_path": "/var/lib/deployer/services/myapp/repo/deployer.yml",
+  "compose_files": ["docker-compose.yml"],
+  "public_url": "https://myapp.busypage.ru/",
+  "env_file_path": "/var/lib/deployer/services/myapp/env/prod.env",
+  "env_file_content": "TOKEN=abc\n",
+  "override_path": "/var/lib/deployer/services/myapp/overrides/prod.override.yml",
+  "override_content": "services:\n  app:\n    labels:\n      - traefik.enable=true\n"
+}
+```
+
+If the current checkout cannot be validated, the endpoint still returns HTTP `200`, but sets
+`valid=false` and fills the `errors` array with `source` and/or `manifest` validation messages.
 
 ## Runtime Actions
 

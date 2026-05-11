@@ -16,6 +16,7 @@ const state = {
     service: "",
     environment: "",
   },
+  runtimePreview: {},
   runtimeStatus: {},
 };
 
@@ -204,6 +205,47 @@ function runtimeStatus(serviceName, environment) {
   );
 }
 
+function runtimePreview(serviceName, environment) {
+  return (
+    state.runtimePreview[runtimeKey(serviceName, environment)] || {
+      loading: true,
+      valid: false,
+      errors: [],
+      source_path: "",
+      manifest_path: "",
+      compose_files: [],
+      public_url: null,
+      env_file_path: "",
+      env_file_content: "",
+      override_path: "",
+      override_content: "",
+    }
+  );
+}
+
+function renderValidationErrors(errors) {
+  if (!errors?.length) return "";
+  return `
+    <div class="inline-error">
+      <div class="error-title">Validation errors</div>
+      <div class="error-list">
+        ${errors.map((item) => `<div><span class="mono">${escapeHtml(item.scope)}</span>: ${escapeHtml(item.message)}</div>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderPreviewSummary(serviceName, environment) {
+  const preview = runtimePreview(serviceName, environment);
+  if (preview.loading) {
+    return `<span class="badge"><span class="dot"></span>checking config</span>`;
+  }
+  if (preview.valid) {
+    return `<span class="badge success"><span class="dot"></span>config valid</span>`;
+  }
+  return `<span class="badge failed"><span class="dot"></span>config invalid</span>`;
+}
+
 function renderRuntimeStatus(serviceName, environment) {
   const summary = runtimeStatus(serviceName, environment);
   if (summary.loading) {
@@ -247,6 +289,9 @@ async function loadAll() {
   ensureExpandedState();
   syncCurrentView();
   render();
+  if (state.currentView.name === "runtime") {
+    loadRuntimePreview(state.currentView.service, state.currentView.environment, true);
+  }
   refreshRuntimeStatuses();
 }
 
@@ -570,6 +615,7 @@ function renderRuntimePage() {
   const env = envSummary(service, environment);
   const envPairs = Object.entries(env.env || {});
   const summary = runtimeStatus(service.name, environment);
+  const preview = runtimePreview(service.name, environment);
   const publicUrl = runtimeUrl(service.name, environment);
   const jobs = state.jobs.filter((job) => job.service === service.name && job.environment === environment);
   return `
@@ -610,6 +656,44 @@ function renderRuntimePage() {
           <button class="btn secondary" onclick="openLogsDrawer('${escapeHtml(service.name)}', '${environment}')">${icon("list")} Logs</button>
           <button class="btn secondary" onclick="openHistoryDrawer('${escapeHtml(service.name)}', '${environment}')">${icon("history")} History</button>
         </div>
+      </section>
+      <section class="card page-card">
+        <div class="page-header">
+          <div>
+            <div class="section-title">Rendered configuration</div>
+            <div class="muted">Current managed env file and generated override for this runtime target.</div>
+          </div>
+          <div class="row wrap">
+            ${renderPreviewSummary(service.name, environment)}
+            <button class="btn secondary" onclick="loadRuntimePreview('${escapeHtml(service.name)}', '${environment}', true)">${icon("refresh")} Reload preview</button>
+          </div>
+        </div>
+        <div class="preview-meta">
+          <div class="fact">
+            <span class="fact-label">Managed env file</span>
+            <span class="fact-value mono">${escapeHtml(preview.env_file_path || "-")}</span>
+          </div>
+          <div class="fact">
+            <span class="fact-label">Managed override</span>
+            <span class="fact-value mono">${escapeHtml(preview.override_path || "-")}</span>
+          </div>
+        </div>
+        ${preview.loading ? `<div class="table-empty muted">Loading preview...</div>` : ""}
+        ${!preview.loading ? renderValidationErrors(preview.errors) : ""}
+        ${!preview.loading
+          ? `
+            <div class="preview-grid">
+              <div class="preview-panel">
+                <div class="section-title">Env file</div>
+                <pre class="log-box compact">${escapeHtml(preview.env_file_content || "# empty")}</pre>
+              </div>
+              <div class="preview-panel">
+                <div class="section-title">Override</div>
+                <pre class="log-box compact">${escapeHtml(preview.override_content || "# override preview unavailable")}</pre>
+              </div>
+            </div>
+          `
+          : ""}
       </section>
       <section class="card page-card">
         <div class="section-title">Environment variables</div>
@@ -892,6 +976,7 @@ function renderAddPanel() {
 function renderDeployModal() {
   const modal = state.deployModal;
   const service = serviceByName(modal.service);
+  const preview = runtimePreview(modal.service, modal.environment);
   return `
     <div class="overlay-backdrop modal-backdrop" onclick="closeDeployModal()"></div>
     <div class="modal">
@@ -914,6 +999,14 @@ function renderDeployModal() {
           <label>Source status</label>
           <input class="input" value="${escapeHtml(service?.source_status?.available ? "source fetched" : "source unavailable")}" disabled>
         </div>
+        <div class="field">
+          <label>Runtime validation</label>
+          <div class="row wrap">
+            ${renderPreviewSummary(modal.service, modal.environment)}
+          </div>
+          <div class="muted top-gap">Preview reflects the current managed checkout for this runtime target.</div>
+        </div>
+        ${preview.loading ? `<div class="muted">Checking current configuration...</div>` : renderValidationErrors(preview.errors)}
         ${modal.error ? `<div class="inline-error">${escapeHtml(modal.error)}</div>` : ""}
         <div class="row actions-end">
           <button type="button" class="btn ghost" onclick="closeDeployModal()">Cancel</button>
@@ -966,11 +1059,49 @@ function openRuntimePage(service, environment) {
   state.currentView = { name: "runtime", service, environment };
   state.actionMenu = null;
   render();
+  loadRuntimePreview(service, environment, false);
 }
 
 function setJobsFilter(key, value) {
   state.jobsFilter[key] = value;
   render();
+}
+
+async function loadRuntimePreview(service, environment, force = false) {
+  const key = runtimeKey(service, environment);
+  const current = state.runtimePreview[key];
+  if (!force && current && !current.loading) {
+    return;
+  }
+  state.runtimePreview[key] = {
+    ...(current || {}),
+    loading: true,
+    errors: current?.errors || [],
+  };
+  render();
+  try {
+    const preview = await api(`/api/services/${service}/preview?environment=${environment}`);
+    state.runtimePreview[key] = {
+      ...preview,
+      loading: false,
+    };
+    render();
+  } catch (error) {
+    state.runtimePreview[key] = {
+      loading: false,
+      valid: false,
+      errors: [{ scope: "api", message: error.message }],
+      source_path: "",
+      manifest_path: "",
+      compose_files: [],
+      public_url: null,
+      env_file_path: "",
+      env_file_content: "",
+      override_path: "",
+      override_content: "",
+    };
+    render();
+  }
 }
 
 function actionMenuPosition(trigger) {
@@ -1136,6 +1267,7 @@ async function openDeployModal(service, environment) {
   };
   state.actionMenu = null;
   render();
+  loadRuntimePreview(service, environment, false);
   try {
     const response = await api(`/api/services/${service}/refs`);
     if (!state.deployModal || state.deployModal.service !== service || state.deployModal.environment !== environment) {
@@ -1243,6 +1375,7 @@ async function pollJob(jobId, service, environment) {
     const job = await api(`/api/jobs/${jobId}`);
     await loadAll();
     if (["success", "failed"].includes(job.status)) {
+      await loadRuntimePreview(service, environment, true);
       if (state.logsDrawer && state.logsDrawer.service === service && state.logsDrawer.environment === environment) {
         await reloadLogsDrawer();
       }

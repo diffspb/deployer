@@ -10,12 +10,12 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from deployer.catalog import CatalogError, ServiceCatalog
+from deployer.catalog import CatalogError, ServiceCatalog, render_env
 from deployer.config import DeployerConfig, load_config
 from deployer.engine import DeploymentEngine
 from deployer.errors import DeployerError
 from deployer.manifest import Manifest, load_manifest
-from deployer.override import route_host
+from deployer.override import render_override, route_host
 from deployer.state import DeploymentRecord, EnvironmentRecord, JobRecord, ServiceRecord, StateStore
 
 
@@ -123,6 +123,10 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         limit: int = Query(default=20, ge=1, le=200),
     ) -> dict:
         return _history_payload(catalog.history(name, environment=environment, limit=limit))
+
+    @app.get("/api/services/{name}/preview")
+    def preview(name: str, catalog: CatalogDep, environment: str = Query(default="prod", pattern="^(prod|dev)$")) -> dict:
+        return _preview_payload(catalog, name, environment)
 
     @app.get("/api/jobs")
     def list_jobs(
@@ -293,6 +297,46 @@ def _command_result_payload(result) -> dict:
         "log": result.log,
         "override_path": str(result.override_path),
         "summary": _status_summary_payload(result.log) if result.status == "success" else None,
+    }
+
+
+def _preview_payload(catalog: ServiceCatalog, name: str, environment: str) -> dict:
+    service = catalog.get_service(name)
+    runtime = catalog.resolve_runtime(name, environment)
+    source_status = catalog.source_status(name)
+    env_file_content = render_env(runtime.environment.env_vars)
+    runtime.env_file.parent.mkdir(parents=True, exist_ok=True)
+    runtime.env_file.write_text(env_file_content)
+
+    errors: list[dict[str, str]] = []
+    manifest = None
+    override_content = None
+    compose_files: list[str] = []
+
+    if source_status.error:
+        errors.append({"scope": "source", "message": source_status.error})
+
+    if source_status.path_exists:
+        try:
+            manifest = load_manifest(runtime.project_dir)
+            override_content = render_override(manifest, environment=environment, env_file=str(runtime.env_file))
+            compose_files = list(manifest.compose.files)
+        except DeployerError as exc:
+            errors.append({"scope": "manifest", "message": str(exc)})
+
+    return {
+        "service": service.name,
+        "environment": environment,
+        "valid": not errors,
+        "errors": errors,
+        "source_path": str(runtime.project_dir),
+        "manifest_path": str(runtime.project_dir / "deployer.yml"),
+        "compose_files": compose_files,
+        "public_url": _public_url_for(manifest, environment),
+        "env_file_path": str(runtime.env_file),
+        "env_file_content": env_file_content,
+        "override_path": str(runtime.override_dir / f"{environment}.override.yml"),
+        "override_content": override_content,
     }
 
 
