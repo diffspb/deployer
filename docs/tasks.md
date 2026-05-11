@@ -53,6 +53,35 @@
 - [x] Add integration tests for git source using a real local bare repository
 - [x] Add Makefile reset targets for local/test state
 
+## Environment Projects Refactor
+
+- [x] Replace the future plan with an environment-first model: `Environment -> Project -> Components`.
+- [x] Document that source repositories should not require deployer-specific files.
+- [x] Document multi-container project support: frontend, backend, workers, and internal components.
+- [x] Document dependency/resource binding direction.
+- [ ] Replace current SQLite schema without compatibility migrations.
+- [ ] Remove global services as deployable/operator objects.
+- [ ] Add environment-scoped `projects` table.
+- [ ] Add `components` table for compose services, generated builds, and image-based containers.
+- [ ] Add `endpoints` table for Traefik-exposed component routes.
+- [ ] Add initial `dependencies` table for resource bindings.
+- [ ] Scope jobs and deployments by `environment + project`.
+- [ ] Replace service catalog layer with environment project catalog operations.
+- [ ] Refactor engine to deploy a resolved project spec instead of requiring repository-local `deployer.yml`.
+- [ ] Support compose overlay mode for existing compose files.
+- [ ] Support generated compose mode from component definitions.
+- [ ] Generate Traefik labels for multiple public endpoints.
+- [ ] Replace `services` CLI commands with `projects` commands scoped by environment.
+- [ ] Remove `runtime-targets` CLI commands.
+- [ ] Fix CLI defaults so packaged service commands do not require `--state-db` or `--runtime-dir`.
+- [ ] Replace API routes with `/api/environments/{environment}/projects/{project}` routes.
+- [ ] Rebuild UI around environment pages and environment project pages.
+- [ ] Remove attach/detach flows from UI and API.
+- [ ] Add GitHub webhook ingestion for environment project deploy policies.
+- [ ] Implement `webhook_auto` for one configured environment project.
+- [ ] Implement `webhook_gated` candidate storage and deploy.
+- [ ] Implement PostgreSQL dependency binding that can use one server with separate databases/users.
+
 ## Phase 2: Runtime Hardening
 
 - [ ] Add Docker socket proxy compose service for deployer.
@@ -84,7 +113,7 @@
 
 ## Runtime Targets v2
 
-- [ ] Read and follow `docs/runtime-targets-v2-roadmap.md` as the implementation sequence for this phase.
+- [x] Superseded by `Environment Projects Refactor`; see `docs/runtime-targets-v2-roadmap.md`.
 - [x] Replace fixed `prod/dev` environment model with dynamic runtime targets loaded from state.
 - [x] Add CRUD operations for runtime targets: create, delete, and list per service.
 - [x] Add global environment profile CRUD for reusable environment definitions.

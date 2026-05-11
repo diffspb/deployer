@@ -3,15 +3,16 @@
 The deployer is split into a reusable engine and thin interfaces.
 
 ```text
-CLI / future UI
+CLI / UI
         |
         v
-FastAPI API / ServiceCatalog
+FastAPI API / EnvironmentProjectCatalog
         |
         v
 DeploymentEngine
         |
-        +-- Manifest loader and validator
+        +-- Project spec resolver
+        +-- Optional manifest importer
         +-- Traefik override generator
         +-- Command runner
         +-- SQLite state store
@@ -24,43 +25,47 @@ DeploymentEngine
 - Source compose files are read-only from the deployer's point of view.
 - Deployment state is explicit and stored in SQLite.
 - Commands are logged as deployment artifacts.
-- One project can have only one active deployment.
-- Different projects may deploy concurrently later.
+- One environment project can have only one active deployment.
+- Different environment projects may deploy concurrently later.
 - The same engine must be reusable from CLI and FastAPI.
-- The catalog owns service/source/environment state.
-- The engine remains path-capable and does not know how sources are fetched.
+- The catalog owns environment/project/component/dependency state.
+- The engine deploys a resolved project spec and does not know how sources are fetched.
 - The UI talks to the FastAPI API, not to Docker and not to engine internals.
+- Source repositories should not require deployer-specific files.
+- A repository-local `deployer.yml` is optional import/config-as-code, not the primary contract.
+- Projects are scoped to environments. There is no global deployable service that is later attached to an environment.
 
-## Current CLI
+## Target CLI
 
-Service catalog mode:
+Environment-first mode:
 
 ```bash
-deployer services add myapp --git-url <url>
-deployer services add-local myapp --path /path/to/project
-deployer services list
-deployer services show myapp
-deployer services remove myapp
-deployer refs myapp
 deployer environments list
 deployer environments add stage --url-prefix stage
-deployer environments update dev --deploy-mode webhook_auto --deploy-source branch --deploy-pattern dev --pattern-type exact
 deployer environments remove stage
-deployer runtime-targets list myapp
-deployer runtime-targets add myapp prod
-deployer runtime-targets add myapp stage
-deployer runtime-targets remove myapp stage
-deployer env list myapp prod
-deployer env set myapp prod KEY=value
-deployer env unset myapp prod KEY
-deployer env render myapp prod
-deployer deploy myapp --environment prod --ref main --state-db /var/lib/deployer/state.db
-deployer history myapp --environment prod --state-db /var/lib/deployer/state.db
-deployer stop myapp --environment prod --state-db /var/lib/deployer/state.db
-deployer down myapp --environment prod --state-db /var/lib/deployer/state.db
-deployer restart myapp --environment prod --state-db /var/lib/deployer/state.db
-deployer status myapp --environment prod --state-db /var/lib/deployer/state.db
-deployer logs myapp --environment prod --tail 200 --state-db /var/lib/deployer/state.db
+
+deployer projects add dev myapp --git-url <url>
+deployer projects add-local dev myapp --path /path/to/project
+deployer projects list dev
+deployer projects show dev myapp
+deployer projects refs dev myapp
+deployer projects remove dev myapp
+
+deployer components add dev myapp backend --build-context backend --dockerfile Dockerfile --port 8000
+deployer endpoints add dev myapp backend --subdomain myapp --auth sso --health-path /health
+
+deployer env list dev myapp
+deployer env set dev myapp KEY=value
+deployer env unset dev myapp KEY
+deployer env render dev myapp
+
+deployer deploy dev myapp --ref main
+deployer history dev myapp
+deployer stop dev myapp
+deployer down dev myapp
+deployer restart dev myapp
+deployer status dev myapp
+deployer logs dev myapp --tail 200
 ```
 
 Path mode remains available for development and direct debugging:
@@ -86,26 +91,28 @@ Runtime command semantics:
 - `status` runs `docker compose --env-file <managed-env> ps`.
 - `logs` runs `docker compose --env-file <managed-env> logs --tail <n>`.
 
-Catalog `history` prints current service runtime target metadata before deployment records:
+Catalog `history` prints current environment project metadata before deployment records:
 
 ```text
-service: myapp
+environment: dev
+project: myapp
 source: git	git@example.com/myapp.git
-current: prod	version=main	ref=main	commit=abc123	last_deployment=42
-42	prod	deploy	success	main	2026-05-10T...
+current: version=main	ref=main	commit=abc123	last_deployment=42
+42	dev/myapp	deploy	success	main	2026-05-10T...
 ```
 
 ## Deployment Flow
 
-Catalog mode:
+Environment project mode:
 
-1. Resolve service by name from SQLite.
-2. Resolve runtime target config and render `/var/lib/deployer/services/<name>/env/<environment>.env`.
+1. Resolve project by `environment + project` from SQLite.
+2. Resolve source, components, endpoints, dependencies, env vars, and deploy policy.
 3. For git sources, fetch tags/branches and checkout requested ref.
-4. Load `deployer.yml` from the managed repo or local source path.
-5. Render `/var/lib/deployer/services/<name>/overrides/<environment>.override.yml`.
-6. Run the same engine flow as path mode.
-7. Store current version/ref/commit on successful deployment.
+4. Build internal project spec. A repository-local `deployer.yml` may be imported, but is not required.
+5. Render managed env files and compose files/overrides under `/var/lib/deployer/environments/<environment>/projects/<project>/`.
+6. Run Docker Compose with BuildKit enabled.
+7. Run configured endpoint healthchecks.
+8. Store current version/ref/commit and deployment log.
 
 Path mode:
 
@@ -119,13 +126,12 @@ Path mode:
 8. Mark deployment as `success` or `failed`.
 9. Persist command log.
 
-Environment profiles are global platform-level definitions. `prod` and `dev` are created as default profile
-definitions for existing workflows, but operators can create additional profiles such as `stage`, `preview-123`,
-or project-specific names.
+Environment profiles are top-level operational boundaries. Operators can create environments such as `dev`,
+`stage`, `prod`, `preview-123`, or customer-specific names.
 
-Service runtime targets are explicit per-service attachments to these profiles. Creating a service only registers
-its source in the catalog; it is not deployable until attached to an environment. Runtime targets store env vars,
-current ref/commit, last deployment, jobs, and logs.
+Projects are created inside environments. Creating a project in `dev` does not create anything in `prod`.
+If the same repository should run in both environments, it is added twice. This removes attach/detach ambiguity
+and makes deploy policy, env vars, dependencies, status, logs, and history unambiguously environment-scoped.
 
 Routing uses the profile `url_prefix`:
 
@@ -133,8 +139,7 @@ Routing uses the profile `url_prefix`:
 - `dev` -> `<subdomain>.dev.<domain>`
 - `stage` -> `<subdomain>.stage.<domain>`
 
-Compose project names remain target-aware through `<project>-<target>` except for `prod`, which keeps the base
-project name for backward compatibility.
+Compose project names are environment-aware, for example `<environment>-<project>` or a sanitized equivalent.
 
 ## Future FastAPI UI
 
@@ -142,11 +147,12 @@ The API layer is implemented as the contract for the future UI. See `docs/api.md
 
 The UI should not call Docker directly. It should call the API, which then calls the catalog/service layer, which then calls the engine.
 
-The target workflow is service-based, not path-based. See `docs/service-catalog-plan.md`.
+The target workflow is environment-project-based, not path-based. See `docs/service-catalog-plan.md`.
 
 Initial UI screens:
 
-- Project list.
+- Environment list.
+- Project list inside an environment.
 - Deployment history.
 - Deploy button.
 - Live deployment log.

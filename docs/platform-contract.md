@@ -2,13 +2,14 @@
 
 This document is the runtime contract between infrastructure, application repositories, and the deployer.
 
-The contract is intentionally small. Application repositories should not need to know every Traefik detail.
+The contract is intentionally small. Application repositories should not need to know every Traefik detail
+or contain deployer-specific configuration.
 
 ## Runtime
 
 - Host runtime is local Docker Engine on one VPS.
-- Deployment unit is a Docker Compose project.
-- Each application has a stable Compose project name.
+- Deployment unit is an environment-scoped project.
+- Each environment project has a stable Compose project name.
 - Public ingress goes through Traefik only.
 - TLS is handled by Traefik and Let's Encrypt.
 - Authentication for private browser UIs is handled by oauth2-proxy.
@@ -30,7 +31,17 @@ Current values from `/home/sanek/projects/claudecode/simple`:
 
 ## Application Requirements
 
-Minimum recommended `docker-compose.yml`:
+The deployer should be able to deploy projects without modifying their repositories.
+
+Minimum repository expectations:
+
+- application containers can be built from Dockerfiles or existing Docker Compose files;
+- runtime configuration is accepted through environment variables;
+- public HTTP components listen on known container ports;
+- health endpoints are recommended, but their paths can be configured in deployer;
+- stateful resource names are not hardcoded in application code.
+
+Minimum recommended Compose shape when a project already has Docker Compose:
 
 ```yaml
 services:
@@ -53,9 +64,61 @@ Applications should expose a health endpoint when practical:
 GET /health -> 200
 ```
 
-## Deployer Manifest
+## Deployer Configuration
 
-Each deployable project should contain `deployer.yml`.
+Primary deployer configuration lives in deployer state and is edited through UI/CLI.
+Repository-local `deployer.yml` may remain supported as an optional import/config-as-code
+format, but it is not required.
+
+The target model is:
+
+```text
+Environment
+  Project
+    Components
+    Endpoints
+    Dependencies
+```
+
+An environment project can use existing compose files or generated component definitions.
+
+Example external project configuration:
+
+```yaml
+environment: dev
+project: tasktrack
+source:
+  type: git
+  url: git@github.com:org/tasktrack.git
+  ref: dev
+compose:
+  mode: overlay
+  files:
+    - docker-compose.yml
+    - docker-compose.prod.yml
+components:
+  - name: backend
+    compose_service: app
+    port: 8000
+endpoints:
+  - name: web
+    component: backend
+    subdomain: tasktrack
+    auth: sso
+    middlewares:
+      - secure-headers@file
+    healthcheck:
+      path: /api/v1/health
+```
+
+The same repository in another environment is another project entry, not an attachment:
+
+```text
+dev/tasktrack
+prod/tasktrack
+```
+
+Optional legacy/import manifest example:
 
 Minimal public service:
 
@@ -103,9 +166,9 @@ healthcheck:
   path: /health
 ```
 
-## Generated Override
+## Generated Runtime Files
 
-The deployer generates `.deployer/docker-compose.override.yml`.
+The deployer generates env files and Compose files/overrides.
 
 The original project compose files are not modified.
 For managed services the generated override also contains the target env file and the same managed
@@ -119,7 +182,7 @@ Docker Compose runtime commands are executed with BuildKit enabled (`DOCKER_BUIL
 The packaged deployer image includes both Docker Compose and Buildx CLI plugins; BuildKit-only
 Dockerfiles will fail if the running deployer image was built before Buildx was added.
 
-Generated labels must include:
+Generated Traefik labels for public endpoints must include:
 
 - `traefik.enable=true`
 - router rule
@@ -130,6 +193,43 @@ Generated labels must include:
 - middleware labels when configured
 
 Every router explicitly points to a Traefik service. This avoids Traefik ambiguity when one container has multiple routers.
+
+## Multi-Component Projects
+
+A project may contain multiple components:
+
+- backend;
+- frontend;
+- worker;
+- scheduler;
+- migrations;
+- internal databases or queues when they are project-owned.
+
+Only components with configured public endpoints receive Traefik labels. Internal
+components can still receive managed env vars, networks, and dependency outputs.
+
+Example public endpoint layout:
+
+```text
+dev/tasktrack frontend -> tasktrack.dev.busypage.ru
+dev/tasktrack backend  -> api.tasktrack.dev.busypage.ru
+prod/tasktrack frontend -> tasktrack.busypage.ru
+prod/tasktrack backend  -> api.tasktrack.busypage.ru
+```
+
+## Dependencies
+
+Environment projects can bind to managed resources. The initial practical target is one
+shared PostgreSQL instance per environment or platform with separate databases/users per
+project:
+
+```text
+dev/tasktrack -> database tasktrack_dev, user tasktrack_dev
+prod/tasktrack -> database tasktrack, user tasktrack
+```
+
+Bindings may first be materialized as env vars such as `DATABASE_URL`, but the logical
+configuration should remain explicit so environments do not accidentally share state.
 
 ## Auth Modes
 

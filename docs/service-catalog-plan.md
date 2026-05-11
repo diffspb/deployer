@@ -1,422 +1,380 @@
-# Service Catalog Plan
+# Environment Project Plan
 
 This is the next major direction for the deployer.
 
-The current deployer can operate on a local project directory. That is useful as a low-level engine primitive, but the target user workflow is service-oriented:
+The previous catalog model treated a `service` as a shared application entry and then
+attached it to one or more runtime targets. That model still allowed confusion: it
+looked like the same service existed outside environments, and UI/actions had to keep
+joining `service + environment`.
 
-- Add a service by name.
-- Configure where its source comes from.
-- Configure any number of runtime targets, for example `dev`, `stage`, `prod`,
-  preview targets, or customer-specific targets.
-- Deploy, stop, restart, update, and observe it from a web UI.
-
-## Target Workflow
-
-### Add Service
-
-1. User opens UI and clicks "Add service".
-2. User enters service name, for example `myapp`.
-3. User chooses source type:
-   - `git` as the primary workflow.
-   - `local` as a debug/admin workflow.
-   - `registry` later.
-4. For git, user enters repository URL and optional credentials.
-5. Deployer clones the repository into its managed workspace.
-6. Deployer reads `deployer.yml` from the repo.
-7. User creates one or more runtime targets with operator-defined names.
-8. User configures deployment policy and environment variables for each runtime target.
-9. Deployer stores service/runtime-target config and can deploy it.
-
-### Run Service
-
-1. User opens service page.
-2. User chooses a runtime target.
-3. User chooses branch/tag/commit, unless the target is driven by an automation policy.
-4. User clicks Deploy.
-5. Deployer fetches source, checks out the requested ref, renders env file and override, runs Compose, then stores current version.
-
-### Observe Services
-
-Dashboard should show:
-
-- user-added services;
-- runtime target status;
-- current ref/tag/commit;
-- last deployment status;
-- links to public app URLs;
-- links to logs in Dozzle;
-- selected infrastructure services from Docker, for example Traefik, Keycloak, oauth2-proxy, Netdata, Dozzle.
-
-## Data Model
-
-### services
+The target model is simpler:
 
 ```text
-id
-name
-source_type        # git | local | registry later
-source_url
-source_path        # managed workspace path or local path
-credentials_id
-default_branch
-created_at
-updated_at
+Environment
+  Project
+    Components
+    Dependencies
+    Deploy policy
 ```
 
-### environments
+A deployable project exists only inside one environment. If the same repository must
+run in `dev` and `prod`, the operator adds it twice: once under `dev`, once under
+`prod`. This intentionally duplicates a small amount of configuration to remove
+runtime ambiguity.
+
+No migration compatibility is required for this refactor. The current SQLite state can
+be reset when this model is implemented.
+
+## Core Objects
+
+### Environment
+
+An environment is the top-level operational boundary.
+
+It owns:
+
+- name, for example `dev`, `stage`, `prod`, `preview-123`, or `customer-a`;
+- URL prefix, for example empty, `dev`, `stage`, or any custom segment;
+- public Docker network;
+- default internal network policy;
+- deploy policy defaults;
+- managed components available to projects, for example shared PostgreSQL, Redis,
+  RabbitMQ, or object storage;
+- future isolation settings.
+
+The environment is not a fixed enum. Operators can create as many environments as
+needed.
+
+### Project
+
+A project is one deployable repository or local source inside one environment.
+
+It owns:
+
+- project name inside the environment;
+- source type: `git` as primary, `local` as admin/debug, `registry` later;
+- source URL or local path;
+- source credentials reference;
+- selected branch, tag, or commit;
+- deploy mode and webhook policy;
+- project-level env vars;
+- current deployed ref and commit;
+- deployment history and jobs;
+- generated runtime files.
+
+The same repository in two environments is represented by two projects:
 
 ```text
-id
-service_id
-name               # operator-defined runtime target name
-url_prefix         # "", "dev", "stage", or any custom prefix segment
-env_vars_json
-env_file_mode      # generated | project_file | mixed
-deploy_mode        # manual | webhook_auto | webhook_gated
-deploy_source      # branch | tag | ref later
-deploy_pattern     # exact branch name or regex/glob depending on source type
-deploy_pattern_type # exact | regex
-auto_deploy_enabled
-last_webhook_event_id
-last_webhook_ref
-last_webhook_commit
-last_webhook_at
-current_version
-current_ref
-current_commit
-last_deployment_id
-created_at
-updated_at
+dev/tasktrack
+prod/tasktrack
 ```
 
-Notes:
+They may use different branches, different env vars, different dependencies, different
+domains, and different deploy policies.
 
-- `runtime target` is a better mental model than a fixed `environment` enum.
-- `url_prefix` controls the generated host prefix. Examples:
-  - `prod` with empty prefix -> `myapp.busypage.ru`
-  - `dev` with prefix `dev` -> `myapp.dev.busypage.ru`
-  - `stage` with prefix `stage` -> `myapp.stage.busypage.ru`
-- `deploy_mode`:
-  - `manual`: deploy only from UI/CLI.
-  - `webhook_auto`: matching webhook immediately schedules a deploy.
-  - `webhook_gated`: matching webhook is stored as the latest candidate version; operator deploys it manually later.
-- `deploy_source` and `deploy_pattern*` define how a webhook is matched:
-  - branch exact match, for example `dev`
-  - tag regex, for example `^v[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$`
+### Components
 
-### deployments
+A component is one container/service that belongs to a project.
 
-Existing deployment history should evolve to:
+Examples:
+
+- `backend` from `backend/Dockerfile`;
+- `frontend` from `frontend/Dockerfile`;
+- `worker` from `backend/Dockerfile` with a different command;
+- `scheduler`;
+- `migrations`.
+
+Each component owns:
+
+- compose service name to generate or override;
+- build context;
+- Dockerfile path;
+- image name/tag if an external image is used;
+- command override when needed;
+- env vars or env var references;
+- public endpoint definitions, if the component is exposed through Traefik;
+- healthcheck definition, if the component is health checked.
+
+The deployer must support multi-container repositories. A project can expose zero, one,
+or many public HTTP endpoints.
+
+### Dependencies
+
+Dependencies describe resources used by the project.
+
+Examples:
+
+- PostgreSQL database on a shared environment PostgreSQL instance;
+- Redis namespace or database;
+- RabbitMQ vhost;
+- S3/MinIO bucket or prefix;
+- external API credentials.
+
+The first implementation may materialize dependencies as env vars, but the model should
+not treat them as arbitrary text forever. The target direction is explicit bindings:
 
 ```text
-id
-service_id
-environment
-action             # deploy | stop | restart | rollback
-version
-ref
-commit_hash
-status
-started_at
-finished_at
-log
+dev/tasktrack -> postgres-main database tasktrack_dev user tasktrack_dev
+prod/tasktrack -> postgres-main database tasktrack user tasktrack
 ```
 
-### secrets
+## Source Repository Contract
+
+The deployer should not require modifying the original project.
+
+The preferred workflow is external configuration stored in deployer state and editable
+from UI. A repository-local `deployer.yml` may remain supported as an optional import
+format, but it must not be mandatory.
+
+Minimum project expectations:
+
+- the repository can build container images with Dockerfile or Docker Compose;
+- runtime configuration is accepted through environment variables;
+- public HTTP components listen on known container ports;
+- health endpoints are recommended but can be configured in deployer;
+- stateful resource names must not be hardcoded in application code.
+
+## Deployment Flow
+
+1. Operator opens an environment page.
+2. Operator adds a project to that environment.
+3. Operator selects source:
+   - git repository and credentials;
+   - or local folder for admin/debug workflows.
+4. Deployer clones or references the source in managed storage.
+5. Operator configures components:
+   - use existing compose files; or
+   - define generated compose components from build contexts and Dockerfiles.
+6. Operator configures public endpoints for selected components.
+7. Operator configures dependencies and env vars.
+8. Operator chooses deploy policy:
+   - manual;
+   - webhook auto;
+   - webhook gated.
+9. Deployer fetches source, checks out the selected ref, renders env files and compose
+   overrides or generated compose, runs Docker Compose, performs healthchecks, and
+   records current ref/commit.
+
+## Routing Rules
+
+Environment URL prefix controls public host generation:
+
+- empty prefix -> `<endpoint>.<domain>`;
+- `dev` -> `<endpoint>.dev.<domain>`;
+- `stage` -> `<endpoint>.stage.<domain>`;
+- custom prefix -> `<endpoint>.<prefix>.<domain>`.
+
+Routing is configured per public endpoint, not per project as a whole.
+
+Example:
 
 ```text
-id
-name
-type               # git_token | ssh_key | registry_credentials
-encrypted_value
-created_at
-updated_at
+dev/tasktrack frontend -> tasktrack.dev.busypage.ru
+dev/tasktrack backend  -> api.tasktrack.dev.busypage.ru
+prod/tasktrack frontend -> tasktrack.busypage.ru
+prod/tasktrack backend  -> api.tasktrack.busypage.ru
 ```
 
-Encryption can be implemented after the catalog shape is stable.
+## Compose Strategy
 
-## Runtime Layout
+The deployer should support two project configuration modes.
 
-Managed runtime layout:
+### Compose Overlay Mode
 
-```text
-/var/lib/deployer/
-  state.db
-  services/
-    <service-name>/
-      repo/
-      env/
-        <target>.env
-      overrides/
-        <target>.yml
-      logs/
-        deploy-<id>.log
-      webhooks/
-        last-event.json
-```
+Use the repository's existing compose files and generate deployer-owned overrides:
 
-The current `.deployer/<environment>.override.yml` project-local layout remains useful for local/debug mode. Managed services should use `/var/lib/deployer/services/<name>/overrides/`.
+- inject managed env files;
+- inject high-priority `environment` values;
+- attach public components to the Traefik network;
+- add Traefik labels for public endpoints;
+- keep source compose files read-only.
 
-## CLI Target
+This is closest to the current implementation.
 
-Service catalog commands:
+### Generated Compose Mode
 
-```bash
-deployer services add myapp --git-url <url>
-deployer services add-local myapp --path /path/to/project
-deployer services list
-deployer services show myapp
-deployer services remove myapp
-deployer refs myapp
-```
+Generate the compose project from component definitions:
 
-Runtime target commands:
+- build context;
+- Dockerfile;
+- image;
+- command;
+- env;
+- networks;
+- labels;
+- dependencies.
 
-```bash
-deployer environments list
-deployer environments add stage --url-prefix stage
-deployer environments update prod --deploy-mode webhook_gated --deploy-source tag --deploy-pattern '^v[0-9]+\.[0-9]+\.[0-9]+$' --pattern-type regex
-deployer environments remove stage
-deployer runtime-targets add myapp stage
-deployer runtime-targets remove myapp stage
-deployer env list myapp prod
-deployer env set myapp prod KEY=value
-deployer env unset myapp prod KEY
-deployer env render myapp prod
-```
-
-Runtime commands:
-
-```bash
-deployer deploy myapp --environment prod --ref main
-deployer stop myapp --environment prod
-deployer restart myapp --environment prod
-deployer status myapp --environment prod
-deployer history myapp --environment prod
-deployer logs myapp --environment prod
-deployer webhook github --event push --payload /tmp/payload.json
-deployer deploy-candidate myapp prod
-```
-
-Path-based commands should remain available for development, but should no longer be the main user-facing workflow.
-
-## API Target
-
-Initial API should mirror CLI operations:
-
-```text
-GET  /api/services
-POST /api/services
-GET  /api/services/{name}
-DELETE /api/services/{name}
-GET  /api/services/{name}/refs
-GET  /api/services/{name}/runtime-targets
-POST /api/services/{name}/runtime-targets
-PATCH /api/services/{name}/runtime-targets/{environment}
-DELETE /api/services/{name}/runtime-targets/{environment}
-GET  /api/services/{name}/env/{environment}
-POST /api/services/{name}/env/{environment}
-POST /api/services/{name}/deploy
-POST /api/services/{name}/stop
-POST /api/services/{name}/restart
-GET  /api/services/{name}/status
-GET  /api/services/{name}/history
-GET  /api/services/{name}/logs
-POST /api/webhooks/github
-GET  /api/services/{name}/runtime-targets/{environment}/candidate
-POST /api/services/{name}/runtime-targets/{environment}/deploy-candidate
-```
-
-## UI Target
-
-The UI must make the split between service definition and runtime targets explicit.
-
-Mental model:
-
-```text
-Service
-  Source
-  Shared settings
-  Runtime target: <name>
-  Runtime target: <name>
-  Runtime target: <name>
-```
-
-Runtime targets are separate deployable units. They can be checked out from different refs, have different env vars, different URLs, different runtime status, different logs, different deployment history, and different automation policies. The UI must not expose mixed service-level runtime actions such as "Deploy dev", "Deploy stage", "Deploy prod", and one shared "Stop" button in the same action group.
-
-Service-level data:
-
-- service name;
-- source type;
-- git URL or local path;
-- default branch;
-- source checkout status;
-- current local checkout ref and commit;
-- shared manifest/compose definition.
-
-Runtime-target data:
-
-- runtime target name;
-- domain/subdomain or generated host prefix;
-- env vars;
-- deploy mode and webhook rules;
-- latest webhook candidate, if the target is gated;
-- current deployed ref/version/commit;
-- last deployment id and status;
-- runtime status;
-- runtime logs;
-- deployment history;
-- runtime actions.
-
-### Near-Term UI Goal
-
-Main page should be a service table or compact service list, not a card grid optimized for aesthetics. Each runtime target should have its own row:
-
-```text
-Service      Target      Public URL                         Status      Ref       Actions
-test-app     dev         https://test-app.dev.busypage.ru    running     develop   ...
-test-app     stage       https://test-app.stage.busypage.ru  stopped     v1-rc1    ...
-test-app     prod        https://test-app.busypage.ru        running     v1.0.0    ...
-```
-
-Service detail may group the same targets under the shared service settings:
-
-```text
-test-app
-source: fetched · master · 56028ed
-
-[ <target-name> ]
-url: https://test-app.dev.busypage.ru
-ref: develop
-commit: a81c3f2
-status: stopped
-Deploy | Restart | Stop | Down | Logs | Env | History
-```
-
-### Pages
-
-- `Services`: main operator page. Lists service definitions and all runtime targets.
-- `Service Detail`: source and shared service settings plus runtime target summaries.
-- `Runtime Detail`: focused page for one target, for example `/services/test-app/dev`, `/services/test-app/stage`, or `/services/test-app/prod`.
-- `Jobs`: global deployment/job audit log.
-- `Webhook Events`: global inbound webhook audit log and candidate queue.
-- `System`: selected infrastructure services such as Traefik, oauth2-proxy, Keycloak, Dozzle, Netdata, and deployer.
-
-### Service Detail
-
-Service detail should not have shared runtime buttons. It should show source/shared information and one card per runtime target:
-
-```text
-Service: test-app
-Source: github... fetched master 56028ed
-
-[ Target: dev ]
-Domain: test-app.dev.busypage.ru
-Deploy mode: webhook_auto
-Trigger: branch == dev
-Current ref: dev
-Current commit: ...
-Env vars: 5
-Last deploy: success
-Actions: Deploy | Restart | Stop | Down | Logs | History | Env
-
-[ Target: stage ]
-Domain: test-app.stage.busypage.ru
-Deploy mode: webhook_auto
-Trigger: tag matches ^v.+-rc[0-9]+$
-Current ref: v1.2.0-rc1
-Current commit: ...
-Env vars: 4
-Last deploy: success
-Actions: Deploy | Restart | Stop | Down | Logs | History | Env
-
-[ Target: prod ]
-Domain: test-app.busypage.ru
-Deploy mode: webhook_gated
-Trigger: tag matches ^v[0-9]+\.[0-9]+\.[0-9]+$
-Pending candidate: v1.2.0
-Current ref: v1.1.4
-Current commit: 56028ed
-Env vars: 3
-Last deploy: success
-Actions: Deploy | Deploy Candidate | Restart | Stop | Down | Logs | History | Env
-```
-
-### Modals And Drawers
-
-Use modals/drawers only when they preserve context:
-
-- `Deploy Runtime Modal`: always scoped to one runtime target, for example `Deploy test-app / prod`; environment is not selectable inside the modal.
-- `Edit Env Drawer`: scoped to one runtime target.
-- `Logs Drawer`: scoped to one runtime target.
-- `Job Details Drawer`: scoped to one job.
-- `Stop`/`Down` confirmation modal: must include service name and runtime target in the title.
-- `Webhook Candidate Drawer`: scoped to one runtime target; shows the latest matching event, commit, tag/branch, and allows `Deploy Candidate`.
+This allows deploying repositories that do not have a useful production compose file.
 
 ## Webhook Model
 
-Initial webhook provider: GitHub.
+Webhook policy belongs to the environment project, not to a global service.
 
-Supported event types in the first version:
+Supported initial policies:
 
-- `push` for branch-based automation.
-- `create` for tag-based automation if needed.
-- `push` with tag refs may also be enough if GitHub delivers the needed ref details consistently for your workflow.
+- `manual`: only deploy from UI/CLI;
+- `webhook_auto`: matching webhook schedules a deploy immediately;
+- `webhook_gated`: matching webhook stores a candidate; operator deploys it manually.
 
-Processing flow:
+Match rules:
 
-1. GitHub sends a signed webhook to the deployer.
-2. Deployer validates HMAC signature and stores raw event metadata in a webhook log.
-3. Deployer resolves affected service(s) by repository URL.
-4. Deployer evaluates each runtime target policy:
-   - branch exact/regex match
-   - tag exact/regex match
-5. If target policy is `webhook_auto`, deploy starts immediately.
-6. If target policy is `webhook_gated`, the event becomes the latest candidate for that target.
-7. UI shows candidate status and lets operator deploy that exact candidate.
+- source: `branch` or `tag`;
+- pattern;
+- pattern type: `exact` or `regex`.
 
-Minimal policy examples, not required target names:
+Examples:
 
-- `dev`: `webhook_auto`, `deploy_source=branch`, `deploy_pattern=dev`, `deploy_pattern_type=exact`
-- `stage`: `webhook_auto`, `deploy_source=tag`, `deploy_pattern=^v.+-rc[0-9]+$`, `deploy_pattern_type=regex`
-- `prod`: `webhook_gated`, `deploy_source=tag`, `deploy_pattern=^v[0-9]+\.[0-9]+\.[0-9]+$`, `deploy_pattern_type=regex`
+```text
+dev/tasktrack: webhook_auto branch exact dev
+stage/tasktrack: webhook_auto tag regex ^v.+-rc[0-9]+$
+prod/tasktrack: webhook_gated tag regex ^v[0-9]+\.[0-9]+\.[0-9]+$
+```
 
-The operator may create fewer targets, more targets, or differently named
-targets. Webhook matching and deployment policy are properties of each runtime
-target, not of a predefined environment type.
+These are examples only. The model must support any environment names and any number of
+environment projects.
 
-## Current Refactor Goal
+## UI Target
 
-The codebase must use an environment-first mental model. A service is first registered in the catalog as a shared
-source definition. It becomes deployable only after the operator explicitly attaches it to one or more environment
-profiles. Creating a new service must not create `prod`, `dev`, or any other runtime target automatically.
+The UI should be environment-first.
 
-This refactor should preserve these invariants:
+Primary navigation:
 
-- runtime actions are always scoped to `service + runtime-target`
-- shared service data remains separate from runtime-target data
-- environment pages list only services explicitly attached to that environment
-- service pages show shared source settings and the attached environments
-- UI never constructs deploy logic itself; it only configures or triggers backend workflows
+```text
+Environments
+  dev
+    tasktrack
+    paas-test
+  prod
+    tasktrack
+Jobs
+Webhook Events
+System
+```
 
-### Immediate Redesign Tasks
+Main work happens on environment pages:
 
-1. Replace dashboard cards with an environment-first service table/list.
-2. Make the sidebar show environments first and services under each environment.
-3. Remove service-level runtime action groups.
-4. Make deploy modal accept fixed `service + environment`; do not choose environment inside it.
-5. Open env editor directly for a fixed runtime target; remove the global env selector.
-6. Filter jobs, history, status, and logs by `service + environment` everywhere in the UI.
-7. Add an attach flow so a catalog service can be added to an environment explicitly.
+- list projects in this environment;
+- show public URLs, runtime status, health, ref/commit, last job;
+- add project to this environment;
+- configure environment resources.
+
+Project page inside an environment:
+
+- source settings;
+- deploy policy;
+- components;
+- endpoints;
+- dependencies;
+- env vars;
+- jobs/history/logs;
+- deploy/restart/stop/down actions.
+
+There should be no global service page that mixes environments. Cross-environment
+comparison can be added later as a reporting page, not as the primary control surface.
+
+## CLI Target
+
+The CLI should mirror the environment-first model.
+
+Examples:
+
+```bash
+deployer environments list
+deployer environments add dev --url-prefix dev
+deployer environments add prod --url-prefix ""
+
+deployer projects add dev tasktrack --git-url git@github.com:org/tasktrack.git
+deployer projects add prod tasktrack --git-url git@github.com:org/tasktrack.git
+deployer projects show dev tasktrack
+deployer projects refs dev tasktrack
+
+deployer components add dev tasktrack backend --build-context backend --dockerfile Dockerfile --port 8000
+deployer components add dev tasktrack frontend --build-context frontend --dockerfile Dockerfile --port 3000
+deployer endpoints add dev tasktrack frontend --subdomain tasktrack --auth sso
+deployer endpoints add dev tasktrack backend --subdomain api.tasktrack --auth sso --health-path /api/v1/health
+
+deployer env set dev tasktrack APP_ENV=dev
+deployer deploy dev tasktrack --ref dev
+deployer restart dev tasktrack
+deployer stop dev tasktrack
+deployer logs dev tasktrack --component backend
+deployer status dev tasktrack
+```
+
+The CLI must not require operators to know Docker container names.
+
+## API Target
+
+Initial API shape:
+
+```text
+GET    /api/environments
+POST   /api/environments
+GET    /api/environments/{environment}
+PATCH  /api/environments/{environment}
+DELETE /api/environments/{environment}
+
+GET    /api/environments/{environment}/projects
+POST   /api/environments/{environment}/projects
+GET    /api/environments/{environment}/projects/{project}
+PATCH  /api/environments/{environment}/projects/{project}
+DELETE /api/environments/{environment}/projects/{project}
+
+GET    /api/environments/{environment}/projects/{project}/components
+POST   /api/environments/{environment}/projects/{project}/components
+PATCH  /api/environments/{environment}/projects/{project}/components/{component}
+DELETE /api/environments/{environment}/projects/{project}/components/{component}
+
+GET    /api/environments/{environment}/projects/{project}/endpoints
+POST   /api/environments/{environment}/projects/{project}/endpoints
+PATCH  /api/environments/{environment}/projects/{project}/endpoints/{endpoint}
+DELETE /api/environments/{environment}/projects/{project}/endpoints/{endpoint}
+
+GET    /api/environments/{environment}/projects/{project}/env
+POST   /api/environments/{environment}/projects/{project}/env
+
+POST   /api/environments/{environment}/projects/{project}/deploy
+POST   /api/environments/{environment}/projects/{project}/restart
+POST   /api/environments/{environment}/projects/{project}/stop
+POST   /api/environments/{environment}/projects/{project}/down
+GET    /api/environments/{environment}/projects/{project}/status
+GET    /api/environments/{environment}/projects/{project}/logs
+GET    /api/environments/{environment}/projects/{project}/history
+
+POST   /api/webhooks/github
+GET    /api/webhook-events
+GET    /api/jobs
+```
 
 ## Implementation Order
 
-1. Add service catalog tables and migrations.
-2. Add managed workspace path handling.
-3. Implement git source clone/fetch/refs/checkout.
-4. Implement environment variable storage and env file rendering.
-5. Change main CLI to operate by service name.
-6. Keep path-based commands as development commands.
-7. Add API skeleton.
-8. Add minimal UI.
-9. Redesign UI around explicit runtime targets.
+1. Freeze this environment-first contract.
+2. Replace state schema with environments, projects, components, endpoints,
+   dependencies, env vars, jobs, deployments, webhook events.
+3. Remove global services and service-to-environment attachment code.
+4. Refactor catalog/service layer into environment project operations.
+5. Refactor engine inputs so it deploys a resolved project spec, not only
+   repository-local `deployer.yml`.
+6. Add compose overlay mode for existing compose projects.
+7. Add multi-endpoint override generation.
+8. Add generated compose mode for component-defined projects.
+9. Refactor API to environment-first routes.
+10. Refactor UI to environment pages and environment project pages.
+11. Fix CLI defaults and expose short environment-first commands.
+12. Add GitHub webhook ingestion and audit log.
+13. Implement webhook auto deploy for an environment project.
+14. Add gated candidate deploy.
+15. Add explicit dependency/resource binding model.
+
+## Near-Term Done Criteria
+
+The refactor is ready when:
+
+- no global service catalog remains in the operator model;
+- projects are always scoped by environment;
+- adding the same repository to two environments creates two independent projects;
+- a project can define multiple components;
+- a project can expose multiple public endpoints;
+- source repositories can be deployed without adding `deployer.yml`;
+- all runtime actions are addressed as `environment + project`;
+- CLI, API, and UI use the same model.

@@ -40,7 +40,7 @@ make reset-test
 
 ## MVP Scope
 
-Current implementation includes the deployer engine and the first service catalog:
+Current implementation includes the deployer engine and the first catalog/UI iteration:
 
 - `deployer.yml` manifest validation.
 - Traefik override generation.
@@ -57,24 +57,33 @@ Current implementation includes the deployer engine and the first service catalo
 - FastAPI JSON API and Web UI.
 - Global environment profiles with explicitly attached services.
 
-Catalog workflow:
+This catalog model is now considered an intermediate implementation, not the target
+architecture. The next refactor moves to:
+
+```text
+Environment -> Project -> Components -> Endpoints / Dependencies
+```
+
+In the target model, projects are added directly inside environments. There is no global
+deployable service that later gets attached to `dev`, `stage`, or `prod`. If the same
+repository should run in two environments, it is added twice, for example
+`dev/tasktrack` and `prod/tasktrack`.
+
+Target workflow:
 
 ```bash
-deployer services add myapp --git-url <url> --state-db /var/lib/deployer/state.db
-deployer services add-local myapp --path /path/to/project --state-db /var/lib/deployer/state.db
-deployer environments add stage --url-prefix stage --state-db /var/lib/deployer/state.db
-deployer environments update dev --deploy-mode webhook_auto --deploy-source branch --deploy-pattern dev --pattern-type exact --state-db /var/lib/deployer/state.db
-deployer runtime-targets add myapp prod --state-db /var/lib/deployer/state.db
-deployer runtime-targets add myapp stage --state-db /var/lib/deployer/state.db
-deployer runtime-targets list myapp --state-db /var/lib/deployer/state.db
-deployer env set myapp prod KEY=value --state-db /var/lib/deployer/state.db
-deployer deploy myapp --environment prod --ref main --state-db /var/lib/deployer/state.db
-deployer history myapp --environment prod --state-db /var/lib/deployer/state.db
-deployer status myapp --environment prod --state-db /var/lib/deployer/state.db
-deployer stop myapp --environment prod --state-db /var/lib/deployer/state.db
-deployer down myapp --environment prod --state-db /var/lib/deployer/state.db
-deployer restart myapp --environment prod --state-db /var/lib/deployer/state.db
-deployer logs myapp --environment prod --tail 200 --state-db /var/lib/deployer/state.db
+deployer environments add dev --url-prefix dev
+deployer projects add dev myapp --git-url <url>
+deployer components add dev myapp backend --build-context backend --dockerfile Dockerfile --port 8000
+deployer endpoints add dev myapp backend --subdomain myapp --auth sso --health-path /health
+deployer env set dev myapp KEY=value
+deployer deploy dev myapp --ref dev
+deployer history dev myapp
+deployer status dev myapp
+deployer stop dev myapp
+deployer down dev myapp
+deployer restart dev myapp
+deployer logs dev myapp --tail 200
 ```
 
 `stop` keeps containers stopped. Use `down` when containers should be removed.
@@ -86,8 +95,8 @@ make api
 ```
 
 Open `http://127.0.0.1:8000/`. The UI uses the same API contract as external clients. It is organized
-environment-first: create/register services in the catalog, attach them to explicit environments, then edit env
-variables, run deploy/stop/down/restart jobs, poll job status, and inspect recent logs for that environment service.
+environment-first in the target architecture: open an environment, add projects to it, configure components,
+endpoints, dependencies, env variables, deploy policy, jobs, and logs in that environment context.
 
 ## Server Runbook
 

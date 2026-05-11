@@ -1,6 +1,17 @@
 # API
 
-The API is the contract for the future web UI. The UI must call these endpoints and must not call Docker directly.
+The API is the contract for the current web UI. The UI must call these endpoints and must not call Docker directly.
+
+This document describes the current intermediate service/runtime-target API. It is superseded as a future
+architecture by the environment-first API in `docs/service-catalog-plan.md`:
+
+```text
+Environment -> Project -> Components -> Endpoints / Dependencies
+```
+
+The next major refactor should replace global `/api/services` and `/api/services/{name}/runtime-targets`
+operations with `/api/environments/{environment}/projects/{project}` operations. No compatibility migration is
+required for the development database.
 
 ## Configuration
 
