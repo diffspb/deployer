@@ -73,6 +73,24 @@ def test_catalog_history_includes_environment_summary(tmp_path: Path):
     assert history.records[0].action == "deploy"
 
 
+def test_catalog_deploys_dynamic_runtime_target_with_url_prefix(tmp_path: Path):
+    project = _project(tmp_path / "project")
+    state = StateStore(tmp_path / "state.db")
+    catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
+    catalog.add_local("myapp", project)
+    catalog.add_environment("myapp", "stage", url_prefix="rc")
+    engine = DeploymentEngine(state)
+
+    result = catalog.deploy("myapp", engine, environment="stage", ref="v1-rc1", dry_run=True)
+
+    assert result.status == "success"
+    assert result.override_path == tmp_path / "runtime" / "services" / "myapp" / "overrides" / "stage.override.yml"
+    assert "Host(`myapp.rc.busypage.ru`)" in result.override_path.read_text()
+    env = state.require_environment("myapp", "stage")
+    assert env.current_ref == "v1-rc1"
+    assert env.last_deployment_id == result.deployment_id
+
+
 def test_render_env_quotes_unsafe_values():
     assert render_env({"A": "plain", "B": "has space", "C": ""}) == 'A=plain\nB="has space"\nC=""\n'
 

@@ -28,6 +28,10 @@ POST   /api/services
 GET    /api/services/{name}
 DELETE /api/services/{name}
 GET    /api/services/{name}/refs
+GET    /api/services/{name}/runtime-targets
+POST   /api/services/{name}/runtime-targets
+PATCH  /api/services/{name}/runtime-targets/{environment}
+DELETE /api/services/{name}/runtime-targets/{environment}
 GET    /api/services/{name}/env/{environment}
 POST   /api/services/{name}/env/{environment}
 DELETE /api/services/{name}/env/{environment}/{key}
@@ -82,6 +86,62 @@ Service detail includes source checkout status:
   }
 }
 ```
+
+Service detail also includes all runtime targets currently stored for the service:
+
+```json
+{
+  "name": "myapp",
+  "environments": [
+    {
+      "name": "prod",
+      "url_prefix": "",
+      "public_url": "https://myapp.busypage.ru/",
+      "env": {},
+      "current_ref": "main",
+      "current_commit": "abc123",
+      "last_deployment_id": 42
+    },
+    {
+      "name": "stage",
+      "url_prefix": "rc",
+      "public_url": "https://myapp.rc.busypage.ru/",
+      "env": {},
+      "current_ref": "v1-rc1",
+      "current_commit": "def456",
+      "last_deployment_id": 43
+    }
+  ]
+}
+```
+
+## Runtime Targets
+
+Runtime targets are arbitrary per-service deployable units. `prod` and `dev` are created as
+defaults for existing workflows, but the API does not restrict the target name set.
+
+Create:
+
+```json
+{
+  "name": "stage",
+  "url_prefix": "rc"
+}
+```
+
+Update:
+
+```json
+{
+  "url_prefix": "stage"
+}
+```
+
+Rules:
+
+- `name` must contain lowercase letters, digits, and dashes.
+- `url_prefix` may be empty for the base host or contain lowercase letters, digits, and dashes.
+- Runtime actions, env vars, history, preview, status, and logs are always scoped to `service + environment`.
 
 ## Runtime Preview
 

@@ -132,11 +132,22 @@ function matchesQuery(parts, query) {
 }
 
 function environmentLabel(name) {
-  return name === "prod" ? "Production" : "Development";
+  return name;
 }
 
 function envSummary(service, environment) {
   return service.environments?.find((item) => item.name === environment) || {};
+}
+
+function serviceEnvironmentNames(service) {
+  return (service.environments || []).map((environment) => environment.name);
+}
+
+function allEnvironmentNames() {
+  return [...new Set([
+    ...state.services.flatMap(serviceEnvironmentNames),
+    ...state.jobs.map((job) => job.environment).filter(Boolean),
+  ])].sort((a, b) => a.localeCompare(b));
 }
 
 function serviceByName(name) {
@@ -146,7 +157,9 @@ function serviceByName(name) {
 function runtimeByName(serviceName, environment) {
   const service = serviceByName(serviceName);
   if (!service) return null;
-  return { service, environment: envSummary(service, environment) };
+  const summary = envSummary(service, environment);
+  if (!summary.name) return null;
+  return { service, environment: summary };
 }
 
 function runtimeUrl(serviceName, environment) {
@@ -347,7 +360,9 @@ function syncCurrentView() {
 }
 
 async function refreshRuntimeStatuses() {
-  const runtimes = state.services.flatMap((service) => ["prod", "dev"].map((environment) => ({ service: service.name, environment })));
+  const runtimes = state.services.flatMap((service) =>
+    serviceEnvironmentNames(service).map((environment) => ({ service: service.name, environment })),
+  );
   runtimes.forEach(({ service, environment }) => {
     state.runtimeStatus[runtimeKey(service, environment)] = {
       ...runtimeStatus(service, environment),
@@ -471,7 +486,7 @@ function renderSidebarService(service) {
       ${expanded
         ? `
           <div class="tree-children">
-            ${["prod", "dev"].map((environment) => `
+            ${serviceEnvironmentNames(service).map((environment) => `
               <button class="nav-item child ${state.currentView.name === "runtime" && state.currentView.service === service.name && state.currentView.environment === environment ? "active" : ""}" onclick="openRuntimePage('${escapeHtml(service.name)}', '${environment}')">
                 <span class="tree-indent"></span>
                 <span class="mono">${escapeHtml(environment)}</span>
@@ -565,8 +580,9 @@ function renderFilterEmptyState(title, message, resetHandler) {
 function renderServicesView() {
   const successful = state.jobs.filter((job) => job.status === "success").length;
   const failed = state.jobs.filter((job) => job.status === "failed").length;
+  const environmentNames = allEnvironmentNames();
   const rows = state.services.flatMap((service) =>
-    ["prod", "dev"]
+    serviceEnvironmentNames(service)
       .filter((environment) => serviceFilterMatch(service, environment))
       .map((environment) => renderServiceTableRow(service, environment)),
   );
@@ -590,8 +606,7 @@ function renderServicesView() {
         <label>Environment</label>
         <select class="select" onchange="setServicesFilter('environment', this.value)">
           <option value="">all</option>
-          <option value="prod" ${state.servicesFilter.environment === "prod" ? "selected" : ""}>prod</option>
-          <option value="dev" ${state.servicesFilter.environment === "dev" ? "selected" : ""}>dev</option>
+          ${environmentNames.map((environment) => `<option value="${escapeHtml(environment)}" ${state.servicesFilter.environment === environment ? "selected" : ""}>${escapeHtml(environment)}</option>`).join("")}
         </select>
       </div>
       <div class="field">
@@ -716,7 +731,7 @@ function renderServicePage() {
       <section class="card page-card">
         <div class="section-title">Runtime targets</div>
         <div class="runtime-mini-grid">
-          ${["prod", "dev"].map((environment) => `
+          ${serviceEnvironmentNames(service).map((environment) => `
             <button class="runtime-mini-card" onclick="openRuntimePage('${escapeHtml(service.name)}', '${environment}')">
               <div class="runtime-mini-head">
                 <span class="badge">${escapeHtml(environment)}</span>
@@ -875,6 +890,7 @@ function renderRuntimePage() {
 }
 
 function renderJobsView() {
+  const environmentNames = allEnvironmentNames();
   const filtered = state.jobs.filter((job) => {
     if (!matchesQuery([job.service, job.environment, job.action, job.ref, job.version, job.status], state.jobsFilter.query)) return false;
     if (state.jobsFilter.service && job.service !== state.jobsFilter.service) return false;
@@ -905,8 +921,7 @@ function renderJobsView() {
         <label>Environment</label>
         <select class="select" onchange="setJobsFilter('environment', this.value)">
           <option value="">all environments</option>
-          <option value="prod" ${state.jobsFilter.environment === "prod" ? "selected" : ""}>prod</option>
-          <option value="dev" ${state.jobsFilter.environment === "dev" ? "selected" : ""}>dev</option>
+          ${environmentNames.map((environment) => `<option value="${escapeHtml(environment)}" ${state.jobsFilter.environment === environment ? "selected" : ""}>${escapeHtml(environment)}</option>`).join("")}
         </select>
       </div>
       <div class="field grow">

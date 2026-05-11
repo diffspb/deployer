@@ -28,15 +28,24 @@ class AddServiceRequest(BaseModel):
 
 
 class DeployRequest(BaseModel):
-    environment: str = Field(default="prod", pattern="^(prod|dev)$")
+    environment: str = "prod"
     ref: str | None = None
     version: str | None = None
     dry_run: bool = False
 
 
 class RuntimeRequest(BaseModel):
-    environment: str = Field(default="prod", pattern="^(prod|dev)$")
+    environment: str = "prod"
     dry_run: bool = False
+
+
+class RuntimeTargetRequest(BaseModel):
+    name: str
+    url_prefix: str | None = None
+
+
+class RuntimeTargetUpdateRequest(BaseModel):
+    url_prefix: str | None = None
 
 
 class EnvSetRequest(BaseModel):
@@ -100,6 +109,32 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         raw = catalog.refs(name)
         return {"service": name, "refs": _refs_payload(raw), "raw_refs": raw}
 
+    @app.get("/api/services/{name}/runtime-targets")
+    def list_runtime_targets(name: str, catalog: CatalogDep) -> dict:
+        return {"service": name, "runtime_targets": [_environment_payload(env) for env in catalog.list_environments(name)]}
+
+    @app.post("/api/services/{name}/runtime-targets", status_code=201)
+    def add_runtime_target(name: str, payload: RuntimeTargetRequest, catalog: CatalogDep) -> dict:
+        env = catalog.add_environment(name, payload.name, url_prefix=payload.url_prefix)
+        return {"service": name, "runtime_target": _environment_payload(env)}
+
+    @app.patch("/api/services/{name}/runtime-targets/{environment}")
+    def update_runtime_target(
+        name: str,
+        environment: str,
+        payload: RuntimeTargetUpdateRequest,
+        catalog: CatalogDep,
+    ) -> dict:
+        env = catalog.update_environment(name, environment, url_prefix=payload.url_prefix)
+        return {"service": name, "runtime_target": _environment_payload(env)}
+
+    @app.delete("/api/services/{name}/runtime-targets/{environment}")
+    def delete_runtime_target(name: str, environment: str, catalog: CatalogDep) -> dict:
+        removed = catalog.remove_environment(name, environment)
+        if not removed:
+            raise HTTPException(status_code=404, detail=f"Unknown runtime target: {name}/{environment}")
+        return {"removed": True, "service": name, "environment": environment}
+
     @app.get("/api/services/{name}/env/{environment}")
     def get_env(name: str, environment: str, catalog: CatalogDep) -> dict:
         env = catalog.get_environment(name, environment)
@@ -119,20 +154,20 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
     def history(
         name: str,
         catalog: CatalogDep,
-        environment: str | None = Query(default=None, pattern="^(prod|dev)$"),
+        environment: str | None = None,
         limit: int = Query(default=20, ge=1, le=200),
     ) -> dict:
         return _history_payload(catalog.history(name, environment=environment, limit=limit))
 
     @app.get("/api/services/{name}/preview")
-    def preview(name: str, catalog: CatalogDep, environment: str = Query(default="prod", pattern="^(prod|dev)$")) -> dict:
+    def preview(name: str, catalog: CatalogDep, environment: str = "prod") -> dict:
         return _preview_payload(catalog, name, environment)
 
     @app.get("/api/jobs")
     def list_jobs(
         context: ContextDep,
         service: str | None = None,
-        environment: str | None = Query(default=None, pattern="^(prod|dev)$"),
+        environment: str | None = None,
         limit: int = Query(default=50, ge=1, le=200),
     ) -> dict:
         return {"jobs": [_job_payload(job) for job in context.state.list_jobs(service, environment, limit)]}
@@ -170,7 +205,7 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         return _schedule_runtime_job(context, background_tasks, name, "restart", payload.environment, payload.dry_run)
 
     @app.get("/api/services/{name}/status")
-    def status(name: str, context: ContextDep, environment: str = Query(default="prod", pattern="^(prod|dev)$")) -> dict:
+    def status(name: str, context: ContextDep, environment: str = "prod") -> dict:
         result = context.catalog.status(name, context.engine, environment=environment)
         return _command_result_payload(result)
 
@@ -178,7 +213,7 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
     def logs(
         name: str,
         context: ContextDep,
-        environment: str = Query(default="prod", pattern="^(prod|dev)$"),
+        environment: str = "prod",
         tail: int = Query(default=200, ge=1, le=5000),
     ) -> dict:
         result = context.catalog.logs(name, context.engine, environment=environment, tail=tail)
@@ -228,6 +263,7 @@ def _environment_payload(env: EnvironmentRecord, public_url: str | None = None) 
     return {
         "name": env.name,
         "subdomain": env.subdomain,
+        "url_prefix": env.url_prefix,
         "public_url": public_url,
         "env": env.env_vars,
         "current_version": env.current_version,
@@ -240,18 +276,12 @@ def _environment_payload(env: EnvironmentRecord, public_url: str | None = None) 
 def _service_detail(catalog: ServiceCatalog, name: str) -> dict:
     service = catalog.get_service(name)
     manifest = _load_service_manifest(service)
+    environments = catalog.list_environments(service.name)
     return {
         **_service_payload(service),
         "source_status": _source_status_payload(catalog.source_status(service.name)),
         "environments": [
-            _environment_payload(
-                catalog.get_environment(service.name, "prod"),
-                public_url=_public_url_for(manifest, "prod"),
-            ),
-            _environment_payload(
-                catalog.get_environment(service.name, "dev"),
-                public_url=_public_url_for(manifest, "dev"),
-            ),
+            _environment_payload(env, public_url=_public_url_for(manifest, env)) for env in environments
         ],
     }
 
@@ -319,7 +349,12 @@ def _preview_payload(catalog: ServiceCatalog, name: str, environment: str) -> di
     if source_status.path_exists:
         try:
             manifest = load_manifest(runtime.project_dir)
-            override_content = render_override(manifest, environment=environment, env_file=str(runtime.env_file))
+            override_content = render_override(
+                manifest,
+                environment=environment,
+                env_file=str(runtime.env_file),
+                url_prefix=runtime.environment.url_prefix,
+            )
             compose_files = list(manifest.compose.files)
         except DeployerError as exc:
             errors.append({"scope": "manifest", "message": str(exc)})
@@ -332,7 +367,7 @@ def _preview_payload(catalog: ServiceCatalog, name: str, environment: str) -> di
         "source_path": str(runtime.project_dir),
         "manifest_path": str(runtime.project_dir / "deployer.yml"),
         "compose_files": compose_files,
-        "public_url": _public_url_for(manifest, environment),
+        "public_url": _public_url_for(manifest, runtime.environment),
         "env_file_path": str(runtime.env_file),
         "env_file_content": env_file_content,
         "override_path": str(runtime.override_dir / f"{environment}.override.yml"),
@@ -442,11 +477,11 @@ def _load_service_manifest(service: ServiceRecord) -> Manifest | None:
         return None
 
 
-def _public_url_for(manifest: Manifest | None, environment: str) -> str | None:
+def _public_url_for(manifest: Manifest | None, environment: EnvironmentRecord) -> str | None:
     if manifest is None or not manifest.routes:
         return None
     route = manifest.routes[0]
-    return f"https://{route_host(route, environment=environment)}/"
+    return f"https://{route_host(route, environment=environment.name, url_prefix=environment.url_prefix)}/"
 
 
 def _schedule_runtime_job(

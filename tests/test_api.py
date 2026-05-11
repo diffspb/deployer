@@ -104,6 +104,50 @@ def test_api_service_local_env_deploy_history_and_delete(tmp_path: Path):
     assert response.json() == {"removed": True, "service": "myapp"}
 
 
+def test_api_runtime_target_crud_and_dynamic_deploy(tmp_path: Path):
+    project = _project(tmp_path / "project")
+    client = _client(tmp_path)
+
+    assert client.post(
+        "/api/services",
+        json={"name": "myapp", "source_type": "local", "path": str(project)},
+    ).status_code == 201
+
+    response = client.post(
+        "/api/services/myapp/runtime-targets",
+        json={"name": "stage", "url_prefix": "rc"},
+    )
+    assert response.status_code == 201
+    assert response.json()["runtime_target"]["name"] == "stage"
+    assert response.json()["runtime_target"]["url_prefix"] == "rc"
+
+    detail = client.get("/api/services/myapp").json()
+    stage = next(item for item in detail["environments"] if item["name"] == "stage")
+    assert stage["public_url"] == "https://myapp.rc.busypage.ru/"
+
+    preview = client.get("/api/services/myapp/preview?environment=stage")
+    assert preview.status_code == 200
+    assert preview.json()["public_url"] == "https://myapp.rc.busypage.ru/"
+    assert "Host(`myapp.rc.busypage.ru`)" in preview.json()["override_content"]
+
+    response = client.post(
+        "/api/services/myapp/deploy",
+        json={"environment": "stage", "ref": "v1-rc1", "dry_run": True},
+    )
+    assert response.status_code == 202
+    job = client.get(f"/api/jobs/{response.json()['id']}").json()
+    assert job["status"] == "success"
+    assert job["environment"] == "stage"
+
+    response = client.patch("/api/services/myapp/runtime-targets/stage", json={"url_prefix": "stage"})
+    assert response.status_code == 200
+    assert response.json()["runtime_target"]["url_prefix"] == "stage"
+
+    response = client.delete("/api/services/myapp/runtime-targets/stage")
+    assert response.status_code == 200
+    assert response.json() == {"removed": True, "service": "myapp", "environment": "stage"}
+
+
 def test_api_validation_and_catalog_errors(tmp_path: Path):
     project = _project(tmp_path / "project")
     client = _client(tmp_path)

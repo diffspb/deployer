@@ -83,12 +83,12 @@
 ## Runtime Targets v2
 
 - [ ] Read and follow `docs/runtime-targets-v2-roadmap.md` as the implementation sequence for this phase.
-- [ ] Replace fixed `prod/dev` environment model with dynamic runtime targets loaded from state.
-- [ ] Add CRUD operations for runtime targets: create, update, delete.
-- [ ] Add per-target `url_prefix` instead of hardcoded `prod/dev` host logic.
+- [x] Replace fixed `prod/dev` environment model with dynamic runtime targets loaded from state.
+- [x] Add CRUD operations for runtime targets: create, update, delete.
+- [x] Add per-target `url_prefix` instead of hardcoded `prod/dev` host logic.
 - [ ] Add per-target deploy policy fields: `deploy_mode`, `deploy_source`, `deploy_pattern`, `deploy_pattern_type`.
 - [ ] Add per-target candidate fields for gated webhook deployments.
-- [ ] Generalize CLI, API, catalog, state, tests, and UI to support any number of arbitrary runtime target names.
+- [x] Generalize CLI, API, catalog, state, tests, and UI to support any number of arbitrary runtime target names.
 - [ ] Add GitHub webhook ingestion with HMAC validation and event audit log.
 - [ ] Implement webhook rule matching for branch-based deployments.
 - [ ] Implement webhook rule matching for tag-based deployments.

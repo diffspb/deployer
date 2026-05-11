@@ -44,6 +44,25 @@ def test_state_stores_services_and_default_environments(tmp_path: Path):
     dev = state.require_environment("myapp", "dev")
     assert prod.subdomain == "myapp"
     assert dev.subdomain == "myapp"
+    assert prod.url_prefix == ""
+    assert dev.url_prefix == "dev"
+
+
+def test_state_manages_dynamic_runtime_targets(tmp_path: Path):
+    state = StateStore(tmp_path / "state.db")
+    state.add_service("myapp", "local", "/srv/myapp")
+
+    stage = state.add_environment("myapp", "stage")
+    preview = state.add_environment("myapp", "preview-123", url_prefix="p123")
+
+    assert stage.url_prefix == "stage"
+    assert preview.url_prefix == "p123"
+    assert [item.name for item in state.list_environments("myapp")] == ["prod", "dev", "preview-123", "stage"]
+
+    updated = state.update_environment("myapp", "stage", url_prefix="rc")
+    assert updated.url_prefix == "rc"
+    assert state.remove_environment("myapp", "preview-123") is True
+    assert state.get_environment("myapp", "preview-123") is None
 
 
 def test_state_updates_environment_vars_and_version(tmp_path: Path):

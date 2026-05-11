@@ -55,6 +55,7 @@ class DeploymentEngine:
         environment: str = "prod",
         override_dir: Path | None = None,
         env_file: str | None = None,
+        url_prefix: str | None = None,
     ) -> DeployResult:
         project_dir = project_dir.resolve()
         manifest = load_manifest(project_dir, manifest_path=manifest_path)
@@ -76,6 +77,7 @@ class DeploymentEngine:
                     environment=environment,
                     output_dir=override_dir,
                     env_file=env_file,
+                    url_prefix=url_prefix,
                 )
                 log_parts.append(f"Generated override: {override_path}")
                 command = compose_command(manifest, override_path, environment=environment)
@@ -86,7 +88,7 @@ class DeploymentEngine:
                 else:
                     result = self.runner.run(command, cwd=project_dir)
                     log_parts.append(result.output)
-                    ok, message = self.health_checker(manifest, environment=environment)
+                    ok, message = self.health_checker(manifest, environment=environment, url_prefix=url_prefix)
                     log_parts.append(message)
                     if not ok:
                         raise RuntimeError(message)
@@ -111,6 +113,7 @@ class DeploymentEngine:
         environment: str = "prod",
         override_dir: Path | None = None,
         env_file: str | None = None,
+        url_prefix: str | None = None,
     ) -> DeployResult:
         project_dir = project_dir.resolve()
         manifest = load_manifest(project_dir, manifest_path=manifest_path)
@@ -132,6 +135,7 @@ class DeploymentEngine:
                     environment=environment,
                     output_dir=override_dir,
                     env_file=env_file,
+                    url_prefix=url_prefix,
                 )
                 log_parts.append(f"Generated override: {override_path}")
                 command = compose_command(manifest, override_path, environment=environment, action="stop")
@@ -158,6 +162,7 @@ class DeploymentEngine:
         environment: str = "prod",
         override_dir: Path | None = None,
         env_file: str | None = None,
+        url_prefix: str | None = None,
     ) -> DeployResult:
         return self._deployment_action(
             "down",
@@ -167,6 +172,7 @@ class DeploymentEngine:
             environment=environment,
             override_dir=override_dir,
             env_file=env_file,
+            url_prefix=url_prefix,
         )
 
     def restart(
@@ -177,6 +183,7 @@ class DeploymentEngine:
         environment: str = "prod",
         override_dir: Path | None = None,
         env_file: str | None = None,
+        url_prefix: str | None = None,
     ) -> DeployResult:
         return self._deployment_action(
             "restart",
@@ -186,6 +193,7 @@ class DeploymentEngine:
             environment=environment,
             override_dir=override_dir,
             env_file=env_file,
+            url_prefix=url_prefix,
         )
 
     def status(
@@ -195,6 +203,7 @@ class DeploymentEngine:
         environment: str = "prod",
         override_dir: Path | None = None,
         env_file: str | None = None,
+        url_prefix: str | None = None,
     ) -> CommandResult:
         project_dir = project_dir.resolve()
         manifest = load_manifest(project_dir, manifest_path=manifest_path)
@@ -204,6 +213,7 @@ class DeploymentEngine:
             environment=environment,
             output_dir=override_dir,
             env_file=env_file,
+            url_prefix=url_prefix,
         )
         command = compose_command(manifest, override_path, environment=environment, action="ps")
         try:
@@ -220,6 +230,7 @@ class DeploymentEngine:
         override_dir: Path | None = None,
         env_file: str | None = None,
         tail: int = 200,
+        url_prefix: str | None = None,
     ) -> CommandResult:
         project_dir = project_dir.resolve()
         manifest = load_manifest(project_dir, manifest_path=manifest_path)
@@ -229,6 +240,7 @@ class DeploymentEngine:
             environment=environment,
             output_dir=override_dir,
             env_file=env_file,
+            url_prefix=url_prefix,
         )
         command = compose_command(manifest, override_path, environment=environment, action="logs", tail=tail)
         try:
@@ -246,6 +258,7 @@ class DeploymentEngine:
         environment: str = "prod",
         override_dir: Path | None = None,
         env_file: str | None = None,
+        url_prefix: str | None = None,
     ) -> DeployResult:
         project_dir = project_dir.resolve()
         manifest = load_manifest(project_dir, manifest_path=manifest_path)
@@ -267,6 +280,7 @@ class DeploymentEngine:
                     environment=environment,
                     output_dir=override_dir,
                     env_file=env_file,
+                    url_prefix=url_prefix,
                 )
                 log_parts.append(f"Generated override: {override_path}")
                 command = compose_command(manifest, override_path, environment=environment, action=action)

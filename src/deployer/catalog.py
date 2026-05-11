@@ -14,8 +14,9 @@ from deployer.state import DeploymentRecord, EnvironmentRecord, ServiceRecord, S
 
 
 DEFAULT_RUNTIME_DIR = Path("/var/lib/deployer")
-VALID_ENVIRONMENTS = {"prod", "dev"}
 _SERVICE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
+_TARGET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+_URL_PREFIX_RE = re.compile(r"^$|^[a-z0-9][a-z0-9-]{0,62}$")
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -106,8 +107,11 @@ class ServiceCatalog:
         limit: int = 20,
     ) -> ServiceHistory:
         service = self.get_service(service_name)
-        environments = ("prod", "dev") if environment is None else (environment,)
-        env_records = tuple(self.get_environment(service_name, item) for item in environments)
+        env_records = (
+            tuple(self.list_environments(service_name))
+            if environment is None
+            else (self.get_environment(service_name, environment),)
+        )
         records = tuple(self.state.history(service.name, environment=environment, limit=limit))
         return ServiceHistory(service, env_records, records)
 
@@ -159,19 +163,48 @@ class ServiceCatalog:
         return SourceStatus(error is None, path_exists, is_git_repo, current_ref, current_commit, error)
 
     def set_env(self, service_name: str, environment: str, key: str, value: str) -> EnvironmentRecord:
-        _validate_environment(environment)
+        _validate_target_name(environment)
         _validate_env_key(key)
         if "\n" in value:
             raise CatalogError("Environment values must be single-line")
         return self.state.set_env_var(service_name, environment, key, value)
 
     def unset_env(self, service_name: str, environment: str, key: str) -> EnvironmentRecord:
-        _validate_environment(environment)
+        _validate_target_name(environment)
         _validate_env_key(key)
         return self.state.unset_env_var(service_name, environment, key)
 
+    def list_environments(self, service_name: str) -> list[EnvironmentRecord]:
+        self.get_service(service_name)
+        return self.state.list_environments(service_name)
+
+    def add_environment(self, service_name: str, environment: str, url_prefix: str | None = None) -> EnvironmentRecord:
+        _validate_target_name(environment)
+        if url_prefix is not None:
+            _validate_url_prefix(url_prefix)
+        try:
+            return self.state.add_environment(service_name, environment, url_prefix=url_prefix)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown service: {service_name}") from exc
+        except sqlite3.IntegrityError as exc:
+            raise CatalogError(f"Runtime target already exists: {service_name}/{environment}") from exc
+
+    def update_environment(self, service_name: str, environment: str, url_prefix: str | None = None) -> EnvironmentRecord:
+        _validate_target_name(environment)
+        if url_prefix is not None:
+            _validate_url_prefix(url_prefix)
+        try:
+            return self.state.update_environment(service_name, environment, url_prefix=url_prefix)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown service environment: {service_name}/{environment}") from exc
+
+    def remove_environment(self, service_name: str, environment: str) -> bool:
+        _validate_target_name(environment)
+        self.get_service(service_name)
+        return self.state.remove_environment(service_name, environment)
+
     def get_environment(self, service_name: str, environment: str) -> EnvironmentRecord:
-        _validate_environment(environment)
+        _validate_target_name(environment)
         try:
             return self.state.require_environment(service_name, environment)
         except KeyError as exc:
@@ -200,6 +233,7 @@ class ServiceCatalog:
             environment=environment,
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
+            url_prefix=runtime.environment.url_prefix,
         )
         merged_log = _merge_logs(runtime.prepare_log, result.log)
         result = DeployResult(
@@ -236,6 +270,7 @@ class ServiceCatalog:
             environment=environment,
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
+            url_prefix=runtime.environment.url_prefix,
         )
 
     def down(
@@ -253,6 +288,7 @@ class ServiceCatalog:
             environment=environment,
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
+            url_prefix=runtime.environment.url_prefix,
         )
 
     def restart(
@@ -270,6 +306,7 @@ class ServiceCatalog:
             environment=environment,
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
+            url_prefix=runtime.environment.url_prefix,
         )
 
     def status(self, service_name: str, engine: DeploymentEngine, environment: str = "prod") -> CommandResult:
@@ -280,6 +317,7 @@ class ServiceCatalog:
             environment=environment,
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
+            url_prefix=runtime.environment.url_prefix,
         )
 
     def logs(
@@ -297,6 +335,7 @@ class ServiceCatalog:
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
             tail=tail,
+            url_prefix=runtime.environment.url_prefix,
         )
 
     def prepare_runtime(self, service_name: str, environment: str, ref: str | None = None) -> ServiceRuntime:
@@ -331,7 +370,7 @@ class ServiceCatalog:
         )
 
     def resolve_runtime(self, service_name: str, environment: str) -> ServiceRuntime:
-        _validate_environment(environment)
+        _validate_target_name(environment)
         service = self.get_service(service_name)
         env = self.get_environment(service_name, environment)
         service_dir = self.service_dir(service_name)
@@ -391,9 +430,14 @@ def _validate_service_name(name: str) -> None:
         raise CatalogError("Service name must contain lowercase letters, digits, and dashes")
 
 
-def _validate_environment(environment: str) -> None:
-    if environment not in VALID_ENVIRONMENTS:
-        raise CatalogError("Environment must be prod or dev")
+def _validate_target_name(environment: str) -> None:
+    if not _TARGET_NAME_RE.fullmatch(environment):
+        raise CatalogError("Runtime target name must contain lowercase letters, digits, and dashes")
+
+
+def _validate_url_prefix(url_prefix: str) -> None:
+    if not _URL_PREFIX_RE.fullmatch(url_prefix):
+        raise CatalogError("URL prefix must be empty or contain lowercase letters, digits, and dashes")
 
 
 def _validate_env_key(key: str) -> None:

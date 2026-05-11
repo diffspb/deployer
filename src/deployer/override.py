@@ -13,11 +13,12 @@ def build_override(
     platform: Platform = DEFAULT_PLATFORM,
     environment: str = "prod",
     env_file: str | None = None,
+    url_prefix: str | None = None,
 ) -> dict:
     labels: list[str] = ["traefik.enable=true"]
 
     for route in manifest.routes:
-        labels.extend(_route_labels(manifest, route, platform, environment))
+        labels.extend(_route_labels(manifest, route, platform, environment, url_prefix))
 
     service_config: dict = {
         "labels": labels,
@@ -44,8 +45,9 @@ def render_override(
     platform: Platform = DEFAULT_PLATFORM,
     environment: str = "prod",
     env_file: str | None = None,
+    url_prefix: str | None = None,
 ) -> str:
-    return yaml.safe_dump(build_override(manifest, platform, environment, env_file), sort_keys=False)
+    return yaml.safe_dump(build_override(manifest, platform, environment, env_file, url_prefix), sort_keys=False)
 
 
 def write_override(
@@ -55,20 +57,27 @@ def write_override(
     environment: str = "prod",
     output_dir: Path | None = None,
     env_file: str | None = None,
+    url_prefix: str | None = None,
 ) -> Path:
     deployer_dir = output_dir or project_dir / ".deployer"
     deployer_dir.mkdir(parents=True, exist_ok=True)
     path = deployer_dir / f"{environment}.override.yml"
-    path.write_text(render_override(manifest, platform, environment, env_file))
+    path.write_text(render_override(manifest, platform, environment, env_file, url_prefix))
     return path
 
 
-def _route_labels(manifest: Manifest, route: Route, platform: Platform, environment: str) -> list[str]:
+def _route_labels(
+    manifest: Manifest,
+    route: Route,
+    platform: Platform,
+    environment: str,
+    url_prefix: str | None,
+) -> list[str]:
     base_router = route.name or manifest.name
     router = base_router if environment == "prod" else f"{base_router}-{environment}"
     service = router
     labels = [
-        f"traefik.http.routers.{router}.rule={_rule(route, platform, environment)}",
+        f"traefik.http.routers.{router}.rule={_rule(route, platform, environment, url_prefix)}",
         f"traefik.http.routers.{router}.entrypoints={platform.entrypoint}",
         f"traefik.http.routers.{router}.tls.certresolver={platform.certresolver}",
         f"traefik.http.routers.{router}.service={service}",
@@ -85,19 +94,29 @@ def _route_labels(manifest: Manifest, route: Route, platform: Platform, environm
     return labels
 
 
-def route_host(route: Route, platform: Platform = DEFAULT_PLATFORM, environment: str = "prod") -> str:
+def route_host(
+    route: Route,
+    platform: Platform = DEFAULT_PLATFORM,
+    environment: str = "prod",
+    url_prefix: str | None = None,
+) -> str:
     if route.host:
         return route.host
     prefix = route.subdomain
-    if environment != "prod":
-        prefix = f"{prefix}.{environment}"
+    effective_url_prefix = _default_url_prefix(environment) if url_prefix is None else url_prefix
+    if effective_url_prefix:
+        prefix = f"{prefix}.{effective_url_prefix}"
     return f"{prefix}.{platform.domain}"
 
 
-def _rule(route: Route, platform: Platform, environment: str) -> str:
-    parts = [f"Host(`{route_host(route, platform, environment)}`)"]
+def _rule(route: Route, platform: Platform, environment: str, url_prefix: str | None) -> str:
+    parts = [f"Host(`{route_host(route, platform, environment, url_prefix)}`)"]
     if route.path_prefix:
         parts.append(f"PathPrefix(`{route.path_prefix}`)")
     if route.exclude_path_prefix:
         parts.append(f"!PathPrefix(`{route.exclude_path_prefix}`)")
     return " && ".join(parts)
+
+
+def _default_url_prefix(environment: str) -> str:
+    return "" if environment == "prod" else environment

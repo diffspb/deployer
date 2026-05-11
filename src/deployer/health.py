@@ -13,16 +13,17 @@ def healthcheck_url(
     manifest: Manifest,
     platform: Platform = DEFAULT_PLATFORM,
     environment: str = "prod",
+    url_prefix: str | None = None,
 ) -> str | None:
     if manifest.healthcheck is None or not manifest.routes:
         return None
     route = manifest.routes[0]
     health = manifest.healthcheck
-    return f"{health.scheme}://{route_host(route, platform, environment)}{health.path}"
+    return f"{health.scheme}://{route_host(route, platform, environment, url_prefix)}{health.path}"
 
 
-def check_health(manifest: Manifest, environment: str = "prod") -> tuple[bool, str]:
-    url = healthcheck_url(manifest, environment=environment)
+def check_health(manifest: Manifest, environment: str = "prod", url_prefix: str | None = None) -> tuple[bool, str]:
+    url = healthcheck_url(manifest, environment=environment, url_prefix=url_prefix)
     if url is None:
         return True, "healthcheck skipped"
 

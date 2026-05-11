@@ -38,6 +38,7 @@ class EnvironmentRecord:
     service_id: int
     name: str
     subdomain: str
+    url_prefix: str
     env_vars: dict[str, str]
     current_version: str | None
     current_ref: str | None
@@ -208,10 +209,10 @@ class StateStore:
             for environment in ("prod", "dev"):
                 conn.execute(
                     """
-                    INSERT INTO environments(service_id, name, subdomain, env_vars_json, created_at, updated_at)
-                    VALUES (?, ?, ?, '{}', ?, ?)
+                    INSERT INTO environments(service_id, name, subdomain, url_prefix, env_vars_json, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, '{}', ?, ?)
                     """,
-                    (service_id, environment, name, now, now),
+                    (service_id, environment, name, _default_url_prefix(environment), now, now),
                 )
         return self.require_service(name)
 
@@ -249,11 +250,78 @@ class StateStore:
             cursor = conn.execute("DELETE FROM services WHERE name = ?", (name,))
             return cursor.rowcount > 0
 
+    def list_environments(self, service_name: str) -> list[EnvironmentRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT e.id, e.service_id, e.name, e.subdomain, e.url_prefix, e.env_vars_json,
+                       e.current_version, e.current_ref, e.current_commit,
+                       e.last_deployment_id, e.created_at, e.updated_at
+                FROM environments e
+                JOIN services s ON s.id = e.service_id
+                WHERE s.name = ?
+                ORDER BY
+                    CASE e.name WHEN 'prod' THEN 0 WHEN 'dev' THEN 1 ELSE 2 END,
+                    e.name
+                """,
+                (service_name,),
+            ).fetchall()
+        return [_environment_record(row) for row in rows]
+
+    def add_environment(self, service_name: str, environment: str, url_prefix: str | None = None) -> EnvironmentRecord:
+        service = self.require_service(service_name)
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO environments(service_id, name, subdomain, url_prefix, env_vars_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, '{}', ?, ?)
+                """,
+                (service.id, environment, service.name, _default_url_prefix(environment) if url_prefix is None else url_prefix, now, now),
+            )
+        return self.require_environment(service_name, environment)
+
+    def update_environment(
+        self,
+        service_name: str,
+        environment: str,
+        url_prefix: str | None = None,
+    ) -> EnvironmentRecord:
+        record = self.require_environment(service_name, environment)
+        if url_prefix is None:
+            return record
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE environments
+                SET url_prefix = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (url_prefix, _now(), record.id),
+            )
+        return self.require_environment(service_name, environment)
+
+    def remove_environment(self, service_name: str, environment: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM environments
+                WHERE id IN (
+                    SELECT e.id
+                    FROM environments e
+                    JOIN services s ON s.id = e.service_id
+                    WHERE s.name = ? AND e.name = ?
+                )
+                """,
+                (service_name, environment),
+            )
+            return cursor.rowcount > 0
+
     def get_environment(self, service_name: str, environment: str) -> EnvironmentRecord | None:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT e.id, e.service_id, e.name, e.subdomain, e.env_vars_json,
+                SELECT e.id, e.service_id, e.name, e.subdomain, e.url_prefix, e.env_vars_json,
                        e.current_version, e.current_ref, e.current_commit,
                        e.last_deployment_id, e.created_at, e.updated_at
                 FROM environments e
@@ -411,6 +479,7 @@ class StateStore:
                     service_id INTEGER NOT NULL,
                     name TEXT NOT NULL,
                     subdomain TEXT NOT NULL,
+                    url_prefix TEXT,
                     env_vars_json TEXT NOT NULL DEFAULT '{}',
                     current_version TEXT,
                     current_ref TEXT,
@@ -421,6 +490,14 @@ class StateStore:
                     UNIQUE(service_id, name),
                     FOREIGN KEY(service_id) REFERENCES services(id) ON DELETE CASCADE
                 )
+                """
+            )
+            _ensure_column(conn, "environments", "url_prefix", "TEXT")
+            conn.execute(
+                """
+                UPDATE environments
+                SET url_prefix = CASE name WHEN 'prod' THEN '' ELSE name END
+                WHERE url_prefix IS NULL
                 """
             )
             conn.execute(
@@ -474,14 +551,19 @@ def _environment_record(row) -> EnvironmentRecord:
         service_id=row[1],
         name=row[2],
         subdomain=row[3],
-        env_vars=json.loads(row[4] or "{}"),
-        current_version=row[5],
-        current_ref=row[6],
-        current_commit=row[7],
-        last_deployment_id=row[8],
-        created_at=row[9],
-        updated_at=row[10],
+        url_prefix=row[4] or "",
+        env_vars=json.loads(row[5] or "{}"),
+        current_version=row[6],
+        current_ref=row[7],
+        current_commit=row[8],
+        last_deployment_id=row[9],
+        created_at=row[10],
+        updated_at=row[11],
     )
+
+
+def _default_url_prefix(environment: str) -> str:
+    return "" if environment == "prod" else environment
 
 
 def _job_record(row) -> JobRecord:
