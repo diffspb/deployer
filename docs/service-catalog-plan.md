@@ -6,7 +6,8 @@ The current deployer can operate on a local project directory. That is useful as
 
 - Add a service by name.
 - Configure where its source comes from.
-- Configure runtime targets such as `dev`, `stage`, `prod`, or custom names.
+- Configure any number of runtime targets, for example `dev`, `stage`, `prod`,
+  preview targets, or customer-specific targets.
 - Deploy, stop, restart, update, and observe it from a web UI.
 
 ## Target Workflow
@@ -22,7 +23,7 @@ The current deployer can operate on a local project directory. That is useful as
 4. For git, user enters repository URL and optional credentials.
 5. Deployer clones the repository into its managed workspace.
 6. Deployer reads `deployer.yml` from the repo.
-7. User creates one or more runtime targets, for example `dev`, `stage`, `prod`.
+7. User creates one or more runtime targets with operator-defined names.
 8. User configures deployment policy and environment variables for each runtime target.
 9. Deployer stores service/runtime-target config and can deploy it.
 
@@ -67,8 +68,8 @@ updated_at
 ```text
 id
 service_id
-name               # dev | stage | prod | custom
-url_prefix         # "", "dev", "stage", or custom prefix segment
+name               # operator-defined runtime target name
+url_prefix         # "", "dev", "stage", or any custom prefix segment
 env_vars_json
 env_file_mode      # generated | project_file | mixed
 deploy_mode        # manual | webhook_auto | webhook_gated
@@ -233,9 +234,9 @@ Mental model:
 Service
   Source
   Shared settings
-  Runtime target: dev
-  Runtime target: stage
-  Runtime target: prod
+  Runtime target: <name>
+  Runtime target: <name>
+  Runtime target: <name>
 ```
 
 Runtime targets are separate deployable units. They can be checked out from different refs, have different env vars, different URLs, different runtime status, different logs, different deployment history, and different automation policies. The UI must not expose mixed service-level runtime actions such as "Deploy dev", "Deploy stage", "Deploy prod", and one shared "Stop" button in the same action group.
@@ -266,28 +267,22 @@ Runtime-target data:
 
 ### Near-Term UI Goal
 
-Main page should be a service table or compact service list, not a card grid optimized for aesthetics. Each row should show source status and two explicit runtime blocks:
+Main page should be a service table or compact service list, not a card grid optimized for aesthetics. Each runtime target should have its own row:
 
 ```text
-Service      Source                  Production                 Development
-test-app     fetched master 56028ed   ref master running         ref develop stopped
-                                     Deploy Restart Stop Logs   Deploy Restart Stop Logs
+Service      Target      Public URL                         Status      Ref       Actions
+test-app     dev         https://test-app.dev.busypage.ru    running     develop   ...
+test-app     stage       https://test-app.stage.busypage.ru  stopped     v1-rc1    ...
+test-app     prod        https://test-app.busypage.ru        running     v1.0.0    ...
 ```
 
-Alternative row shape:
+Service detail may group the same targets under the shared service settings:
 
 ```text
 test-app
 source: fetched · master · 56028ed
 
-[ PROD ]
-url: https://test-app.busypage.ru
-ref: master
-commit: 56028ed
-status: running
-Deploy | Restart | Stop | Down | Logs | Env | History
-
-[ DEV ]
+[ <target-name> ]
 url: https://test-app.dev.busypage.ru
 ref: develop
 commit: a81c3f2
@@ -312,7 +307,7 @@ Service detail should not have shared runtime buttons. It should show source/sha
 Service: test-app
 Source: github... fetched master 56028ed
 
-[ Development ]
+[ Target: dev ]
 Domain: test-app.dev.busypage.ru
 Deploy mode: webhook_auto
 Trigger: branch == dev
@@ -322,7 +317,7 @@ Env vars: 5
 Last deploy: success
 Actions: Deploy | Restart | Stop | Down | Logs | History | Env
 
-[ Stage ]
+[ Target: stage ]
 Domain: test-app.stage.busypage.ru
 Deploy mode: webhook_auto
 Trigger: tag matches ^v.+-rc[0-9]+$
@@ -332,7 +327,7 @@ Env vars: 4
 Last deploy: success
 Actions: Deploy | Restart | Stop | Down | Logs | History | Env
 
-[ Production ]
+[ Target: prod ]
 Domain: test-app.busypage.ru
 Deploy mode: webhook_gated
 Trigger: tag matches ^v[0-9]+\.[0-9]+\.[0-9]+$
@@ -377,11 +372,15 @@ Processing flow:
 6. If target policy is `webhook_gated`, the event becomes the latest candidate for that target.
 7. UI shows candidate status and lets operator deploy that exact candidate.
 
-Minimal policy examples:
+Minimal policy examples, not required target names:
 
 - `dev`: `webhook_auto`, `deploy_source=branch`, `deploy_pattern=dev`, `deploy_pattern_type=exact`
 - `stage`: `webhook_auto`, `deploy_source=tag`, `deploy_pattern=^v.+-rc[0-9]+$`, `deploy_pattern_type=regex`
 - `prod`: `webhook_gated`, `deploy_source=tag`, `deploy_pattern=^v[0-9]+\.[0-9]+\.[0-9]+$`, `deploy_pattern_type=regex`
+
+The operator may create fewer targets, more targets, or differently named
+targets. Webhook matching and deployment policy are properties of each runtime
+target, not of a predefined environment type.
 
 ## Near-Term Refactor Goal
 

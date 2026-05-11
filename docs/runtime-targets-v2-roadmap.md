@@ -9,8 +9,8 @@ The immediate business goal is:
 
 That goal must not create technical debt that blocks:
 
-- adding `stage`
-- adding gated `prod`
+- adding any number of runtime targets
+- adding gated targets
 - adding resource isolation
 - adding future target-specific infrastructure policy
 
@@ -31,7 +31,7 @@ Today the deployer assumes:
 
 This is good enough for the current MVP, but it is the wrong base for:
 
-- `stage`
+- any additional target names
 - custom target names
 - branch/tag-trigger policies
 - gated deployment candidates
@@ -61,11 +61,13 @@ Service-level data must not contain runtime behavior assumptions such as:
 
 A runtime target is the deployable unit.
 
-Examples:
+Examples, not a fixed set:
 
 - `myapp/dev`
 - `myapp/stage`
 - `myapp/prod`
+- `myapp/preview-123`
+- `myapp/customer-a`
 
 Each runtime target owns:
 
@@ -114,7 +116,7 @@ Each runtime target should define:
   - `exact`
   - `regex`
 
-Examples:
+Policy examples:
 
 - `dev`:
   - `deploy_mode=webhook_auto`
@@ -133,6 +135,10 @@ Examples:
   - `deploy_source=tag`
   - `deploy_pattern=^v[0-9]+\.[0-9]+\.[0-9]+$`
   - `deploy_pattern_type=regex`
+
+These names are only sample target configurations. The model must allow an
+operator to create as many targets as needed and assign any supported deploy
+policy to each target.
 
 ### Resource Bindings
 
@@ -174,7 +180,8 @@ Relevant future dimensions:
 
 Important principle:
 
-- `dev`, `stage`, and `prod` must never share production data accidentally
+- no target must share production data accidentally unless that sharing is an
+  explicit, visible configuration decision
 
 Practical minimum policy:
 
@@ -253,7 +260,7 @@ Work:
 Acceptance:
 
 - service may have any number of runtime targets
-- `stage` can be created without code changes
+- arbitrary target names can be created without code changes
 - no webhook behavior yet
 
 ### Phase 2: Generalize Routing And Override Generation
@@ -274,7 +281,7 @@ Work:
 
 Acceptance:
 
-- `dev`, `stage`, and `prod` all render stable URLs and override files
+- arbitrary targets render stable URLs and override files
 
 ### Phase 3: Generalize API And UI
 
@@ -295,9 +302,9 @@ Work:
 
 Acceptance:
 
-- operator can create `stage`
+- operator can create, update, and delete runtime targets
 - operator can configure target policies from UI
-- UI never assumes there are exactly two targets
+- UI never assumes a fixed target count or a fixed target name set
 
 ### Phase 4: Add Webhook Ingestion
 
@@ -342,21 +349,21 @@ Work:
 Acceptance:
 
 - push to branch `dev` triggers deploy of target `dev`
-- same implementation path supports future `stage` and `prod`
+- same implementation path supports any future target and policy combination
 - no `prod/dev` special-casing is added
 
-### Phase 6: Add Stage And Gated Production
+### Phase 6: Add Additional Target Policies
 
 Goal:
 
-- extend the same model to `stage` and `prod`
+- prove that the same model supports additional automatic and gated targets
 
 Work:
 
-- configure `stage`:
+- configure an automatic tag-based target, for example `stage`:
   - `webhook_auto`
   - tag regex
-- configure `prod`:
+- configure a gated target, for example `prod`:
   - `webhook_gated`
   - release tag regex
 - add candidate inspection UI
@@ -364,9 +371,9 @@ Work:
 
 Acceptance:
 
-- tag event may auto-deploy `stage`
-- release tag event may update `prod` candidate without deploying
-- operator can promote exact candidate to `prod`
+- tag event may auto-deploy the configured tag-based target
+- release tag event may update a gated target candidate without deploying
+- operator can promote exact candidate to the chosen target
 
 ### Phase 7: Add Resource Binding Model
 
@@ -383,7 +390,7 @@ Work:
 Acceptance:
 
 - target resource topology is explicit
-- `dev` cannot silently reuse `prod` resource namespace by mistake
+- a non-production target cannot silently reuse a production resource namespace by mistake
 
 ## Why `dev by webhook` Must Wait For The Refactor
 
@@ -395,15 +402,16 @@ The tempting shortcut would be:
 
 That would create debt immediately:
 
-- no reusable model for `stage`
-- no reusable model for gated `prod`
+- no reusable model for other target names
+- no reusable model for gated targets
 - more `prod/dev` conditionals across API and UI
 - later migration would require deleting webhook code, not extending it
 
 The correct interpretation of the business goal is:
 
-- `dev by webhook` is the first delivered policy instance
+- `dev by webhook` is the first delivered example of the generic policy model
 - not a one-off special branch hack
+- target names and target count remain operator-defined
 
 ## Recommended Immediate Sequence
 
@@ -414,8 +422,8 @@ The next implementation order should be:
 3. API and UI generalization
 4. GitHub webhook ingestion and audit log
 5. `dev` auto-deploy by branch webhook
-6. `stage` auto-deploy by tag regex
-7. `prod` gated deploy by release tag
+6. optional automatic tag-based target, for example `stage`
+7. optional gated release target, for example `prod`
 8. resource binding model
 
 ## Near-Term Done Criteria
@@ -424,6 +432,6 @@ We can say the Runtime Targets v2 foundation is ready when:
 
 - backend no longer assumes only `prod/dev`
 - UI renders arbitrary target names
-- one service can own `dev`, `stage`, and `prod`
+- one service can own any number of runtime targets
 - GitHub webhook rules are stored per target
-- `dev by webhook` works through the same generic policy model that will later power `stage` and `prod`
+- `dev by webhook` works through the same generic policy model that will later power any other target

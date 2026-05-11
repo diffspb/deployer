@@ -88,7 +88,7 @@
 - [ ] Add per-target `url_prefix` instead of hardcoded `prod/dev` host logic.
 - [ ] Add per-target deploy policy fields: `deploy_mode`, `deploy_source`, `deploy_pattern`, `deploy_pattern_type`.
 - [ ] Add per-target candidate fields for gated webhook deployments.
-- [ ] Generalize CLI, API, catalog, state, tests, and UI to support arbitrary target names such as `dev`, `stage`, `prod`.
+- [ ] Generalize CLI, API, catalog, state, tests, and UI to support any number of arbitrary runtime target names.
 - [ ] Add GitHub webhook ingestion with HMAC validation and event audit log.
 - [ ] Implement webhook rule matching for branch-based deployments.
 - [ ] Implement webhook rule matching for tag-based deployments.
@@ -96,7 +96,7 @@
 - [ ] Implement `webhook_gated` mode: matching event updates candidate without deploying.
 - [ ] Add UI for target deploy mode and trigger configuration.
 - [ ] Add UI for candidate inspection and `Deploy Candidate`.
-- [ ] Add sample target setup:
+- [ ] Add sample target setup as an example, not as a fixed environment set:
   - `dev` auto by branch push
   - `stage` auto by tag regex
   - `prod` gated by release tag regex
