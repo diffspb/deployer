@@ -1,3 +1,12 @@
+function loadStoredJson(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? { ...fallback, ...JSON.parse(raw) } : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 const state = {
   services: [],
   jobs: [],
@@ -12,12 +21,20 @@ const state = {
   jobDrawer: null,
   actionMenu: null,
   expandedServices: {},
-  jobsFilter: {
+  servicesFilter: loadStoredJson("deployer-services-filter", {
+    query: "",
+    environment: "",
+    status: "",
+  }),
+  jobsFilter: loadStoredJson("deployer-jobs-filter", {
+    query: "",
     service: "",
     environment: "",
-  },
+    status: "",
+  }),
   runtimePreview: {},
   runtimeStatus: {},
+  loadError: "",
 };
 
 const root = document.getElementById("deployer-root");
@@ -106,6 +123,12 @@ function formatTime(value) {
 
 function formatSource(service) {
   return service.source_url || service.source_path || "-";
+}
+
+function matchesQuery(parts, query) {
+  if (!query) return true;
+  const lowered = query.toLowerCase();
+  return parts.some((part) => String(part ?? "").toLowerCase().includes(lowered));
 }
 
 function environmentLabel(name) {
@@ -282,17 +305,24 @@ function renderVersionCell(serviceName, environment) {
 }
 
 async function loadAll() {
-  const [services, jobs] = await Promise.all([api("/api/services"), api("/api/jobs?limit=100")]);
-  const details = await Promise.all(services.map((service) => api(`/api/services/${service.name}`)));
-  state.services = details;
-  state.jobs = jobs.jobs || [];
-  ensureExpandedState();
-  syncCurrentView();
-  render();
-  if (state.currentView.name === "runtime") {
-    loadRuntimePreview(state.currentView.service, state.currentView.environment, true);
+  try {
+    const [services, jobs] = await Promise.all([api("/api/services"), api("/api/jobs?limit=100")]);
+    const details = await Promise.all(services.map((service) => api(`/api/services/${service.name}`)));
+    state.services = details;
+    state.jobs = jobs.jobs || [];
+    state.loadError = "";
+    ensureExpandedState();
+    syncCurrentView();
+    render();
+    if (state.currentView.name === "runtime") {
+      loadRuntimePreview(state.currentView.service, state.currentView.environment, true);
+    }
+    refreshRuntimeStatuses();
+  } catch (error) {
+    state.loadError = error.message;
+    render();
+    throw error;
   }
-  refreshRuntimeStatuses();
 }
 
 function ensureExpandedState() {
@@ -313,6 +343,7 @@ function syncCurrentView() {
   if (state.jobsFilter.service && !serviceByName(state.jobsFilter.service)) {
     state.jobsFilter.service = "";
   }
+  persistJobsFilter();
 }
 
 async function refreshRuntimeStatuses() {
@@ -360,6 +391,14 @@ function setToast(message) {
   }, 3500);
 }
 
+function persistServicesFilter() {
+  localStorage.setItem("deployer-services-filter", JSON.stringify(state.servicesFilter));
+}
+
+function persistJobsFilter() {
+  localStorage.setItem("deployer-jobs-filter", JSON.stringify(state.jobsFilter));
+}
+
 function render() {
   root.innerHTML = `
     <div class="app-shell">
@@ -367,6 +406,7 @@ function render() {
       <main class="main">
         ${renderTopbar()}
         <section class="content">
+          ${state.loadError ? renderLoadErrorBanner() : ""}
           ${renderCurrentView()}
         </section>
       </main>
@@ -377,6 +417,17 @@ function render() {
       ${state.addOpen ? renderAddPanel() : ""}
       ${state.deployModal ? renderDeployModal() : ""}
       ${state.toast ? `<div class="toast">${escapeHtml(state.toast)}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderLoadErrorBanner() {
+  return `
+    <div class="inline-error banner-error">
+      <div class="error-title">Failed to refresh data</div>
+      <div class="error-list">
+        <div>${escapeHtml(state.loadError)}</div>
+      </div>
     </div>
   `;
 }
@@ -463,11 +514,61 @@ function renderCurrentView() {
   return renderServicesView();
 }
 
+function serviceFilterMatch(service, environment) {
+  const filter = state.servicesFilter;
+  const summary = runtimeStatus(service.name, environment);
+  if (filter.environment && filter.environment !== environment) return false;
+  if (
+    filter.status &&
+    ((filter.status === "running" && summary.state !== "running") ||
+      (filter.status === "stopped" && summary.state !== "stopped") ||
+      (filter.status === "problem" && !["unknown"].includes(summary.state) && summary.health !== "unhealthy"))
+  ) {
+    return false;
+  }
+  return matchesQuery(
+    [
+      service.name,
+      environment,
+      service.source_status?.current_ref,
+      service.source_status?.current_commit,
+      runtimeUrl(service.name, environment),
+      envSummary(service, environment).current_ref,
+      envSummary(service, environment).current_commit,
+    ],
+    filter.query,
+  );
+}
+
+function clearServicesFilter() {
+  state.servicesFilter = { query: "", environment: "", status: "" };
+  persistServicesFilter();
+  render();
+}
+
+function clearJobsFilter() {
+  state.jobsFilter = { query: "", service: "", environment: "", status: "" };
+  persistJobsFilter();
+  render();
+}
+
+function renderFilterEmptyState(title, message, resetHandler) {
+  return `
+    <div class="empty compact-empty">
+      <div style="font-weight:800">${escapeHtml(title)}</div>
+      <div>${escapeHtml(message)}</div>
+      <button class="btn secondary" onclick="${resetHandler}()">${icon("refresh")} Clear filters</button>
+    </div>
+  `;
+}
+
 function renderServicesView() {
   const successful = state.jobs.filter((job) => job.status === "success").length;
   const failed = state.jobs.filter((job) => job.status === "failed").length;
   const rows = state.services.flatMap((service) =>
-    ["prod", "dev"].map((environment) => renderServiceTableRow(service, environment)),
+    ["prod", "dev"]
+      .filter((environment) => serviceFilterMatch(service, environment))
+      .map((environment) => renderServiceTableRow(service, environment)),
   );
   return `
     <div class="toolbar">
@@ -480,20 +581,47 @@ function renderServicesView() {
         <span class="badge failed"><span class="dot"></span>${failed} failed</span>
       </div>
     </div>
+    <div class="filter-bar card">
+      <div class="field grow">
+        <label>Search</label>
+        <input class="input" value="${escapeHtml(state.servicesFilter.query)}" placeholder="service, ref, commit, url" oninput="setServicesFilter('query', this.value)">
+      </div>
+      <div class="field">
+        <label>Environment</label>
+        <select class="select" onchange="setServicesFilter('environment', this.value)">
+          <option value="">all</option>
+          <option value="prod" ${state.servicesFilter.environment === "prod" ? "selected" : ""}>prod</option>
+          <option value="dev" ${state.servicesFilter.environment === "dev" ? "selected" : ""}>dev</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Status</label>
+        <select class="select" onchange="setServicesFilter('status', this.value)">
+          <option value="">all</option>
+          <option value="running" ${state.servicesFilter.status === "running" ? "selected" : ""}>running</option>
+          <option value="stopped" ${state.servicesFilter.status === "stopped" ? "selected" : ""}>stopped</option>
+          <option value="problem" ${state.servicesFilter.status === "problem" ? "selected" : ""}>problem</option>
+        </select>
+      </div>
+    </div>
     ${state.services.length
       ? `
-        <div class="table table-wide">
-          <div class="table-row table-head services-table-head">
-            <div>Service</div>
-            <div>Environment</div>
-            <div>Link</div>
-            <div>Status</div>
-            <div>Version</div>
-            <div>Quick</div>
-            <div>Actions</div>
-          </div>
-          ${rows.join("")}
-        </div>
+        ${rows.length
+          ? `
+            <div class="table table-wide">
+              <div class="table-row table-head services-table-head">
+                <div>Service</div>
+                <div>Environment</div>
+                <div>Link</div>
+                <div>Status</div>
+                <div>Version</div>
+                <div>Quick</div>
+                <div>Actions</div>
+              </div>
+              ${rows.join("")}
+            </div>
+          `
+          : renderFilterEmptyState("No runtimes match the current filters", "Try another search string or reset the filters.", "clearServicesFilter")}
       `
       : renderEmpty()}
   `;
@@ -748,8 +876,10 @@ function renderRuntimePage() {
 
 function renderJobsView() {
   const filtered = state.jobs.filter((job) => {
+    if (!matchesQuery([job.service, job.environment, job.action, job.ref, job.version, job.status], state.jobsFilter.query)) return false;
     if (state.jobsFilter.service && job.service !== state.jobsFilter.service) return false;
     if (state.jobsFilter.environment && job.environment !== state.jobsFilter.environment) return false;
+    if (state.jobsFilter.status && job.status !== state.jobsFilter.status) return false;
     return true;
   });
   return `
@@ -760,6 +890,10 @@ function renderJobsView() {
       </div>
     </div>
     <div class="filter-bar card">
+      <div class="field grow">
+        <label>Search</label>
+        <input class="input" value="${escapeHtml(state.jobsFilter.query)}" placeholder="service, action, ref, status" oninput="setJobsFilter('query', this.value)">
+      </div>
       <div class="field grow">
         <label>Service</label>
         <select class="select" onchange="setJobsFilter('service', this.value)">
@@ -775,19 +909,33 @@ function renderJobsView() {
           <option value="dev" ${state.jobsFilter.environment === "dev" ? "selected" : ""}>dev</option>
         </select>
       </div>
-    </div>
-    <div class="table">
-      <div class="table-row table-head jobs-table-head">
-        <div>Service</div>
-        <div>Action</div>
-        <div>Status</div>
-        <div>Target</div>
-        <div>Ref</div>
-        <div>Finished</div>
-        <div></div>
+      <div class="field grow">
+        <label>Status</label>
+        <select class="select" onchange="setJobsFilter('status', this.value)">
+          <option value="">all statuses</option>
+          <option value="queued" ${state.jobsFilter.status === "queued" ? "selected" : ""}>queued</option>
+          <option value="running" ${state.jobsFilter.status === "running" ? "selected" : ""}>running</option>
+          <option value="success" ${state.jobsFilter.status === "success" ? "selected" : ""}>success</option>
+          <option value="failed" ${state.jobsFilter.status === "failed" ? "selected" : ""}>failed</option>
+        </select>
       </div>
-      ${filtered.length ? filtered.map(renderGlobalJobRow).join("") : `<div class="table-empty muted">No jobs match the current filters.</div>`}
     </div>
+    ${filtered.length
+      ? `
+        <div class="table">
+          <div class="table-row table-head jobs-table-head">
+            <div>Service</div>
+            <div>Action</div>
+            <div>Status</div>
+            <div>Target</div>
+            <div>Ref</div>
+            <div>Finished</div>
+            <div></div>
+          </div>
+          ${filtered.map(renderGlobalJobRow).join("")}
+        </div>
+      `
+      : renderFilterEmptyState("No jobs match the current filters", "Try another search string or reset the job filters.", "clearJobsFilter")}
   `;
 }
 
@@ -1064,6 +1212,13 @@ function openRuntimePage(service, environment) {
 
 function setJobsFilter(key, value) {
   state.jobsFilter[key] = value;
+  persistJobsFilter();
+  render();
+}
+
+function setServicesFilter(key, value) {
+  state.servicesFilter[key] = value;
+  persistServicesFilter();
   render();
 }
 

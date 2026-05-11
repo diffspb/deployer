@@ -472,7 +472,9 @@ button:disabled {
 }
 
 .filter-bar {
+  align-items: end;
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 16px;
   padding: 14px;
@@ -741,6 +743,14 @@ button:disabled {
   min-height: 240px;
   padding: 24px;
   text-align: center;
+}
+
+.compact-empty {
+  min-height: 180px;
+}
+
+.banner-error {
+  margin-bottom: 16px;
 }
 
 .overlay-backdrop {
