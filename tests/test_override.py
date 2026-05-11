@@ -72,3 +72,24 @@ def test_render_dev_override_uses_dev_subdomain_and_names():
 
     assert "traefik.http.routers.tasktrack-dev.rule=Host(`tasktrack.dev.busypage.ru`)" in rendered
     assert "traefik.http.routers.tasktrack-dev.service=tasktrack-dev" in rendered
+
+
+def test_override_injects_managed_env_vars_as_high_priority_environment():
+    manifest = parse_manifest(
+        {
+            "name": "tasktrack",
+            "service": "app",
+            "port": 8000,
+            "routes": [{"subdomain": "tasktrack"}],
+        }
+    )
+
+    override = build_override(
+        manifest,
+        env_file="/var/lib/deployer/services/tasktrack/env/dev.env",
+        env_vars={"APP_ENV": "fixed", "TOKEN": "abc"},
+    )
+    service = override["services"]["app"]
+
+    assert service["env_file"] == "/var/lib/deployer/services/tasktrack/env/dev.env"
+    assert service["environment"] == {"APP_ENV": "fixed", "TOKEN": "abc"}

@@ -197,12 +197,15 @@ Example response:
   "env_file_path": "/var/lib/deployer/services/myapp/env/prod.env",
   "env_file_content": "TOKEN=abc\n",
   "override_path": "/var/lib/deployer/services/myapp/overrides/prod.override.yml",
-  "override_content": "services:\n  app:\n    labels:\n      - traefik.enable=true\n"
+  "override_content": "services:\n  app:\n    labels:\n      - traefik.enable=true\n    env_file: /var/lib/deployer/services/myapp/env/prod.env\n    environment:\n      TOKEN: abc\n"
 }
 ```
 
 If the current checkout cannot be validated, the endpoint still returns HTTP `200`, but sets
 `valid=false` and fills the `errors` array with `source` and/or `manifest` validation messages.
+Managed environment variables are rendered both into the generated env file and into the generated
+compose override `environment` section. The override value has the highest priority and deliberately
+replaces project-level defaults such as `APP_ENV: ${APP_ENV:-local}`.
 
 ## Runtime Actions
 

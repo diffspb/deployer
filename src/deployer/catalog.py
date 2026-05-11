@@ -307,6 +307,7 @@ class ServiceCatalog:
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
             url_prefix=runtime.environment.url_prefix,
+            env_vars=runtime.environment.env_vars,
         )
         merged_log = _merge_logs(runtime.prepare_log, result.log)
         result = DeployResult(
@@ -344,6 +345,7 @@ class ServiceCatalog:
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
             url_prefix=runtime.environment.url_prefix,
+            env_vars=runtime.environment.env_vars,
         )
 
     def down(
@@ -362,6 +364,7 @@ class ServiceCatalog:
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
             url_prefix=runtime.environment.url_prefix,
+            env_vars=runtime.environment.env_vars,
         )
 
     def restart(
@@ -380,6 +383,7 @@ class ServiceCatalog:
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
             url_prefix=runtime.environment.url_prefix,
+            env_vars=runtime.environment.env_vars,
         )
 
     def status(self, service_name: str, engine: DeploymentEngine, environment: str = "prod") -> CommandResult:
@@ -391,6 +395,7 @@ class ServiceCatalog:
             override_dir=runtime.override_dir,
             env_file=str(runtime.env_file),
             url_prefix=runtime.environment.url_prefix,
+            env_vars=runtime.environment.env_vars,
         )
 
     def logs(
@@ -409,6 +414,7 @@ class ServiceCatalog:
             env_file=str(runtime.env_file),
             tail=tail,
             url_prefix=runtime.environment.url_prefix,
+            env_vars=runtime.environment.env_vars,
         )
 
     def prepare_runtime(self, service_name: str, environment: str, ref: str | None = None) -> ServiceRuntime:

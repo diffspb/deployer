@@ -74,6 +74,7 @@ def test_api_service_local_env_deploy_history_and_delete(tmp_path: Path):
     assert preview.json()["valid"] is True
     assert preview.json()["env_file_content"] == "TOKEN=abc\n"
     assert "traefik.enable=true" in preview.json()["override_content"]
+    assert "environment:\n      TOKEN: abc" in preview.json()["override_content"]
     assert preview.json()["compose_files"] == ["docker-compose.yml"]
 
     response = client.post(

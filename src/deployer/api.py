@@ -412,6 +412,7 @@ def _preview_payload(catalog: ServiceCatalog, name: str, environment: str) -> di
                 environment=environment,
                 env_file=str(runtime.env_file),
                 url_prefix=runtime.environment.url_prefix,
+                env_vars=runtime.environment.env_vars,
             )
             compose_files = list(manifest.compose.files)
         except DeployerError as exc:
