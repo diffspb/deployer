@@ -114,7 +114,7 @@ def test_api_runtime_target_crud_and_dynamic_deploy(tmp_path: Path):
     ).status_code == 201
 
     response = client.post(
-        "/api/services/myapp/runtime-targets",
+        "/api/environments",
         json={
             "name": "stage",
             "url_prefix": "rc",
@@ -125,9 +125,13 @@ def test_api_runtime_target_crud_and_dynamic_deploy(tmp_path: Path):
         },
     )
     assert response.status_code == 201
+    assert response.json()["environment"]["name"] == "stage"
+    assert response.json()["environment"]["url_prefix"] == "rc"
+    assert response.json()["environment"]["deploy_mode"] == "webhook_auto"
+
+    response = client.post("/api/services/myapp/runtime-targets", json={"name": "stage"})
+    assert response.status_code == 201
     assert response.json()["runtime_target"]["name"] == "stage"
-    assert response.json()["runtime_target"]["url_prefix"] == "rc"
-    assert response.json()["runtime_target"]["deploy_mode"] == "webhook_auto"
 
     detail = client.get("/api/services/myapp").json()
     stage = next(item for item in detail["environments"] if item["name"] == "stage")
@@ -149,15 +153,15 @@ def test_api_runtime_target_crud_and_dynamic_deploy(tmp_path: Path):
     assert job["environment"] == "stage"
 
     response = client.patch(
-        "/api/services/myapp/runtime-targets/stage",
+        "/api/environments/stage",
         json={
             "url_prefix": "stage",
             "deploy_mode": "webhook_gated",
         },
     )
     assert response.status_code == 200
-    assert response.json()["runtime_target"]["url_prefix"] == "stage"
-    assert response.json()["runtime_target"]["deploy_mode"] == "webhook_gated"
+    assert response.json()["environment"]["url_prefix"] == "stage"
+    assert response.json()["environment"]["deploy_mode"] == "webhook_gated"
 
     response = client.delete("/api/services/myapp/runtime-targets/stage")
     assert response.status_code == 200

@@ -27,10 +27,13 @@ GET    /api/services
 POST   /api/services
 GET    /api/services/{name}
 DELETE /api/services/{name}
+GET    /api/environments
+POST   /api/environments
+PATCH  /api/environments/{environment}
+DELETE /api/environments/{environment}
 GET    /api/services/{name}/refs
 GET    /api/services/{name}/runtime-targets
 POST   /api/services/{name}/runtime-targets
-PATCH  /api/services/{name}/runtime-targets/{environment}
 DELETE /api/services/{name}/runtime-targets/{environment}
 GET    /api/services/{name}/env/{environment}
 POST   /api/services/{name}/env/{environment}
@@ -123,10 +126,10 @@ Service detail also includes all runtime targets currently stored for the servic
 }
 ```
 
-## Runtime Targets
+## Environment Profiles
 
-Runtime targets are arbitrary per-service deployable units. `prod` and `dev` are created as
-defaults for existing workflows, but the API does not restrict the target name set.
+Environment profiles are global platform-level definitions. `prod` and `dev` are created as
+defaults for existing workflows, but the API does not restrict the profile name set.
 
 Create:
 
@@ -158,6 +161,20 @@ Rules:
 - `deploy_source` is `branch` or `tag` for webhook targets.
 - `deploy_pattern_type` is `exact` or `regex` for webhook targets.
 - webhook targets must define `deploy_source`, `deploy_pattern`, and `deploy_pattern_type`.
+
+## Runtime Targets
+
+Runtime targets are per-service enablements of global environment profiles. They store service-specific
+runtime state: env vars, current ref/commit, deployment history, jobs, logs, and candidates.
+
+Create a runtime target by referencing an existing profile:
+
+```json
+{
+  "name": "stage"
+}
+```
+
 - Runtime actions, env vars, history, preview, status, and logs are always scoped to `service + environment`.
 
 ## Runtime Preview

@@ -33,6 +33,7 @@ def test_compose_command_includes_all_files():
         "up",
         "-d",
         "--build",
+        "--force-recreate",
     ]
 
     down_command = compose_command(manifest, Path(".deployer/docker-compose.override.yml"), action="down")

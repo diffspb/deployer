@@ -323,7 +323,7 @@ def compose_command(
         command.extend(["-f", file])
     command.extend(["-f", str(override_path)])
     if action == "up":
-        command.extend(["up", "-d", "--build"])
+        command.extend(["up", "-d", "--build", "--force-recreate"])
     elif action == "stop":
         command.append("stop")
     elif action == "down":

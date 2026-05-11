@@ -54,16 +54,22 @@ def test_state_manages_dynamic_runtime_targets(tmp_path: Path):
     state = StateStore(tmp_path / "state.db")
     state.add_service("myapp", "local", "/srv/myapp")
 
-    stage = state.add_environment(
-        "myapp",
+    stage_profile = state.add_environment_profile(
         "stage",
+        url_prefix="stage",
         deploy_mode="webhook_auto",
         deploy_source="tag",
         deploy_pattern="^v.+-rc[0-9]+$",
         deploy_pattern_type="regex",
     )
-    preview = state.add_environment("myapp", "preview-123", url_prefix="p123")
+    stage = state.add_environment(
+        "myapp",
+        "stage",
+    )
+    state.add_environment_profile("preview-123", url_prefix="p123")
+    preview = state.add_environment("myapp", "preview-123")
 
+    assert stage_profile.deploy_mode == "webhook_auto"
     assert stage.url_prefix == "stage"
     assert stage.deploy_mode == "webhook_auto"
     assert stage.deploy_source == "tag"
@@ -71,7 +77,9 @@ def test_state_manages_dynamic_runtime_targets(tmp_path: Path):
     assert preview.url_prefix == "p123"
     assert [item.name for item in state.list_environments("myapp")] == ["prod", "dev", "preview-123", "stage"]
 
-    updated = state.update_environment("myapp", "stage", url_prefix="rc", deploy_mode="webhook_gated")
+    updated_profile = state.update_environment_profile("stage", url_prefix="rc", deploy_mode="webhook_gated")
+    updated = state.require_environment("myapp", "stage")
+    assert updated_profile.url_prefix == "rc"
     assert updated.url_prefix == "rc"
     assert updated.deploy_mode == "webhook_gated"
     assert state.remove_environment("myapp", "preview-123") is True

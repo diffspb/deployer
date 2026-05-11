@@ -173,13 +173,16 @@ deployer refs myapp
 Runtime target commands:
 
 ```bash
+deployer environments list
+deployer environments add stage --url-prefix stage
+deployer environments update prod --deploy-mode webhook_gated --deploy-source tag --deploy-pattern '^v[0-9]+\.[0-9]+\.[0-9]+$' --pattern-type regex
+deployer environments remove stage
+deployer runtime-targets add myapp stage
+deployer runtime-targets remove myapp stage
 deployer env list myapp prod
 deployer env set myapp prod KEY=value
 deployer env unset myapp prod KEY
 deployer env render myapp prod
-deployer runtime-targets add myapp stage --url-prefix stage
-deployer runtime-targets update myapp prod --deploy-mode webhook_gated --deploy-source tag --deploy-pattern '^v[0-9]+\.[0-9]+\.[0-9]+$' --pattern-type regex
-deployer runtime-targets remove myapp stage
 ```
 
 Runtime commands:

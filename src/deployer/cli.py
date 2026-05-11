@@ -29,6 +29,10 @@ def main(argv: list[str] | None = None) -> int:
             state = StateStore(args.state_db)
             catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
             return _handle_runtime_targets(args, catalog)
+        if args.command == "environments":
+            state = StateStore(args.state_db)
+            catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+            return _handle_environments(args, catalog)
         if args.command == "refs":
             state = StateStore(args.state_db)
             catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
@@ -204,37 +208,54 @@ def _handle_runtime_targets(args: argparse.Namespace, catalog: ServiceCatalog) -
             )
         return 0
     if args.runtime_targets_command == "add":
-        env = catalog.add_environment(
-            args.service,
-            args.name,
-            url_prefix=args.url_prefix,
-            deploy_mode=args.deploy_mode,
-            deploy_source=args.deploy_source,
-            deploy_pattern=args.deploy_pattern,
-            deploy_pattern_type=args.pattern_type,
-        )
+        env = catalog.add_environment(args.service, args.name)
         print(f"added\t{args.service}\t{env.name}\turl_prefix={env.url_prefix or '-'}")
-        return 0
-    if args.runtime_targets_command == "update":
-        env = catalog.update_environment(
-            args.service,
-            args.name,
-            url_prefix=args.url_prefix,
-            deploy_mode=args.deploy_mode,
-            deploy_source=args.deploy_source,
-            deploy_pattern=args.deploy_pattern,
-            deploy_pattern_type=args.pattern_type,
-        )
-        print(
-            f"updated\t{args.service}\t{env.name}\turl_prefix={env.url_prefix or '-'}\t"
-            f"deploy_mode={env.deploy_mode}"
-        )
         return 0
     if args.runtime_targets_command == "remove":
         removed = catalog.remove_environment(args.service, args.name)
         print("removed" if removed else "not found")
         return 0 if removed else 1
     raise DeployerError("Unknown runtime-targets command")
+
+
+def _handle_environments(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
+    if args.environments_command == "list":
+        for profile in catalog.list_environment_profiles():
+            print(
+                f"{profile.name}\turl_prefix={profile.url_prefix or '-'}\t"
+                f"deploy_mode={profile.deploy_mode}\t"
+                f"deploy_source={profile.deploy_source or '-'}\t"
+                f"deploy_pattern={profile.deploy_pattern or '-'}\t"
+                f"pattern_type={profile.deploy_pattern_type or '-'}"
+            )
+        return 0
+    if args.environments_command == "add":
+        profile = catalog.add_environment_profile(
+            args.name,
+            url_prefix=args.url_prefix,
+            deploy_mode=args.deploy_mode,
+            deploy_source=args.deploy_source,
+            deploy_pattern=args.deploy_pattern,
+            deploy_pattern_type=args.pattern_type,
+        )
+        print(f"added\t{profile.name}\turl_prefix={profile.url_prefix or '-'}")
+        return 0
+    if args.environments_command == "update":
+        profile = catalog.update_environment_profile(
+            args.name,
+            url_prefix=args.url_prefix,
+            deploy_mode=args.deploy_mode,
+            deploy_source=args.deploy_source,
+            deploy_pattern=args.deploy_pattern,
+            deploy_pattern_type=args.pattern_type,
+        )
+        print(f"updated\t{profile.name}\turl_prefix={profile.url_prefix or '-'}\tdeploy_mode={profile.deploy_mode}")
+        return 0
+    if args.environments_command == "remove":
+        removed = catalog.remove_environment_profile(args.name)
+        print("removed" if removed else "not found")
+        return 0 if removed else 1
+    raise DeployerError("Unknown environments command")
 
 
 def _handle_env(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
@@ -383,6 +404,36 @@ def _parser() -> argparse.ArgumentParser:
     refs.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
     refs.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
 
+    environments = subparsers.add_parser("environments")
+    environments.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
+    environments.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    environments_subparsers = environments.add_subparsers(dest="environments_command", required=True)
+
+    environments_list = environments_subparsers.add_parser("list")
+    _add_catalog_options(environments_list)
+
+    environments_add = environments_subparsers.add_parser("add")
+    _add_catalog_options(environments_add)
+    environments_add.add_argument("name")
+    environments_add.add_argument("--url-prefix")
+    environments_add.add_argument("--deploy-mode", default="manual")
+    environments_add.add_argument("--deploy-source")
+    environments_add.add_argument("--deploy-pattern")
+    environments_add.add_argument("--pattern-type", dest="pattern_type")
+
+    environments_update = environments_subparsers.add_parser("update")
+    _add_catalog_options(environments_update)
+    environments_update.add_argument("name")
+    environments_update.add_argument("--url-prefix")
+    environments_update.add_argument("--deploy-mode")
+    environments_update.add_argument("--deploy-source")
+    environments_update.add_argument("--deploy-pattern")
+    environments_update.add_argument("--pattern-type", dest="pattern_type")
+
+    environments_remove = environments_subparsers.add_parser("remove")
+    _add_catalog_options(environments_remove)
+    environments_remove.add_argument("name")
+
     runtime_targets = subparsers.add_parser("runtime-targets")
     runtime_targets.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
     runtime_targets.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
@@ -396,21 +447,6 @@ def _parser() -> argparse.ArgumentParser:
     _add_catalog_options(runtime_targets_add)
     runtime_targets_add.add_argument("service")
     runtime_targets_add.add_argument("name")
-    runtime_targets_add.add_argument("--url-prefix")
-    runtime_targets_add.add_argument("--deploy-mode", default="manual")
-    runtime_targets_add.add_argument("--deploy-source")
-    runtime_targets_add.add_argument("--deploy-pattern")
-    runtime_targets_add.add_argument("--pattern-type", dest="pattern_type")
-
-    runtime_targets_update = runtime_targets_subparsers.add_parser("update")
-    _add_catalog_options(runtime_targets_update)
-    runtime_targets_update.add_argument("service")
-    runtime_targets_update.add_argument("name")
-    runtime_targets_update.add_argument("--url-prefix")
-    runtime_targets_update.add_argument("--deploy-mode")
-    runtime_targets_update.add_argument("--deploy-source")
-    runtime_targets_update.add_argument("--deploy-pattern")
-    runtime_targets_update.add_argument("--pattern-type", dest="pattern_type")
 
     runtime_targets_remove = runtime_targets_subparsers.add_parser("remove")
     _add_catalog_options(runtime_targets_remove)

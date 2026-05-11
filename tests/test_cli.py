@@ -108,13 +108,12 @@ def test_cli_service_catalog_local_workflow(tmp_path: Path, capsys):
     assert (
         main(
             [
-                "runtime-targets",
+                "environments",
                 "--state-db",
                 str(state_db),
                 "--runtime-dir",
                 str(runtime_dir),
                 "add",
-                "myapp",
                 "stage",
                 "--url-prefix",
                 "rc",
@@ -126,6 +125,23 @@ def test_cli_service_catalog_local_workflow(tmp_path: Path, capsys):
                 "^v.+-rc[0-9]+$",
                 "--pattern-type",
                 "regex",
+            ]
+        )
+        == 0
+    )
+    assert "added\tstage" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "runtime-targets",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "add",
+                "myapp",
+                "stage",
             ]
         )
         == 0
@@ -153,13 +169,12 @@ def test_cli_service_catalog_local_workflow(tmp_path: Path, capsys):
     assert (
         main(
             [
-                "runtime-targets",
+                "environments",
                 "--state-db",
                 str(state_db),
                 "--runtime-dir",
                 str(runtime_dir),
                 "update",
-                "myapp",
                 "stage",
                 "--deploy-mode",
                 "webhook_gated",

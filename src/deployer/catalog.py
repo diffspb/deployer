@@ -10,7 +10,7 @@ from deployer.engine import CommandResult, DeployResult, DeploymentEngine
 from deployer.errors import CommandError, DeployerError
 from deployer.manifest import load_manifest
 from deployer.runner import CommandRunner
-from deployer.state import DeploymentRecord, EnvironmentRecord, ServiceRecord, StateStore
+from deployer.state import DeploymentRecord, EnvironmentProfileRecord, EnvironmentRecord, ServiceRecord, StateStore
 
 
 DEFAULT_RUNTIME_DIR = Path("/var/lib/deployer")
@@ -103,6 +103,80 @@ class ServiceCatalog:
     def list_services(self) -> list[ServiceRecord]:
         return self.state.list_services()
 
+    def list_environment_profiles(self) -> list[EnvironmentProfileRecord]:
+        return self.state.list_environment_profiles()
+
+    def get_environment_profile(self, name: str) -> EnvironmentProfileRecord:
+        _validate_target_name(name)
+        try:
+            return self.state.require_environment_profile(name)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown environment profile: {name}") from exc
+
+    def add_environment_profile(
+        self,
+        name: str,
+        url_prefix: str | None = None,
+        deploy_mode: str = "manual",
+        deploy_source: str | None = None,
+        deploy_pattern: str | None = None,
+        deploy_pattern_type: str | None = None,
+    ) -> EnvironmentProfileRecord:
+        _validate_target_name(name)
+        if url_prefix is not None:
+            _validate_url_prefix(url_prefix)
+        _validate_deploy_policy(deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type)
+        try:
+            return self.state.add_environment_profile(
+                name,
+                url_prefix=url_prefix,
+                deploy_mode=deploy_mode,
+                deploy_source=deploy_source,
+                deploy_pattern=deploy_pattern,
+                deploy_pattern_type=deploy_pattern_type,
+            )
+        except sqlite3.IntegrityError as exc:
+            raise CatalogError(f"Environment profile already exists: {name}") from exc
+
+    def update_environment_profile(
+        self,
+        name: str,
+        url_prefix: str | None = None,
+        deploy_mode: str | None = None,
+        deploy_source: str | None = None,
+        deploy_pattern: str | None = None,
+        deploy_pattern_type: str | None = None,
+    ) -> EnvironmentProfileRecord:
+        _validate_target_name(name)
+        if url_prefix is not None:
+            _validate_url_prefix(url_prefix)
+        try:
+            current = self.state.require_environment_profile(name)
+            next_policy = {
+                "deploy_mode": current.deploy_mode if deploy_mode is None else deploy_mode,
+                "deploy_source": current.deploy_source if deploy_source is None else deploy_source,
+                "deploy_pattern": current.deploy_pattern if deploy_pattern is None else deploy_pattern,
+                "deploy_pattern_type": current.deploy_pattern_type if deploy_pattern_type is None else deploy_pattern_type,
+            }
+            _validate_deploy_policy(**next_policy)
+            return self.state.update_environment_profile(
+                name,
+                url_prefix=url_prefix,
+                deploy_mode=deploy_mode,
+                deploy_source=deploy_source,
+                deploy_pattern=deploy_pattern,
+                deploy_pattern_type=deploy_pattern_type,
+            )
+        except KeyError as exc:
+            raise CatalogError(f"Unknown environment profile: {name}") from exc
+
+    def remove_environment_profile(self, name: str) -> bool:
+        _validate_target_name(name)
+        try:
+            return self.state.remove_environment_profile(name)
+        except ValueError as exc:
+            raise CatalogError(str(exc)) from exc
+
     def history(
         self,
         service_name: str,
@@ -185,64 +259,17 @@ class ServiceCatalog:
         self,
         service_name: str,
         environment: str,
-        url_prefix: str | None = None,
-        deploy_mode: str = "manual",
-        deploy_source: str | None = None,
-        deploy_pattern: str | None = None,
-        deploy_pattern_type: str | None = None,
     ) -> EnvironmentRecord:
         _validate_target_name(environment)
-        if url_prefix is not None:
-            _validate_url_prefix(url_prefix)
-        _validate_deploy_policy(deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type)
         try:
-            return self.state.add_environment(
-                service_name,
-                environment,
-                url_prefix=url_prefix,
-                deploy_mode=deploy_mode,
-                deploy_source=deploy_source,
-                deploy_pattern=deploy_pattern,
-                deploy_pattern_type=deploy_pattern_type,
-            )
+            return self.state.add_environment(service_name, environment)
         except KeyError as exc:
-            raise CatalogError(f"Unknown service: {service_name}") from exc
+            missing = str(exc).strip("'")
+            if missing == service_name:
+                raise CatalogError(f"Unknown service: {service_name}") from exc
+            raise CatalogError(f"Unknown environment profile: {environment}") from exc
         except sqlite3.IntegrityError as exc:
             raise CatalogError(f"Runtime target already exists: {service_name}/{environment}") from exc
-
-    def update_environment(
-        self,
-        service_name: str,
-        environment: str,
-        url_prefix: str | None = None,
-        deploy_mode: str | None = None,
-        deploy_source: str | None = None,
-        deploy_pattern: str | None = None,
-        deploy_pattern_type: str | None = None,
-    ) -> EnvironmentRecord:
-        _validate_target_name(environment)
-        if url_prefix is not None:
-            _validate_url_prefix(url_prefix)
-        try:
-            current = self.state.require_environment(service_name, environment)
-            next_policy = {
-                "deploy_mode": current.deploy_mode if deploy_mode is None else deploy_mode,
-                "deploy_source": current.deploy_source if deploy_source is None else deploy_source,
-                "deploy_pattern": current.deploy_pattern if deploy_pattern is None else deploy_pattern,
-                "deploy_pattern_type": current.deploy_pattern_type if deploy_pattern_type is None else deploy_pattern_type,
-            }
-            _validate_deploy_policy(**next_policy)
-            return self.state.update_environment(
-                service_name,
-                environment,
-                url_prefix=url_prefix,
-                deploy_mode=deploy_mode,
-                deploy_source=deploy_source,
-                deploy_pattern=deploy_pattern,
-                deploy_pattern_type=deploy_pattern_type,
-            )
-        except KeyError as exc:
-            raise CatalogError(f"Unknown service environment: {service_name}/{environment}") from exc
 
     def remove_environment(self, service_name: str, environment: str) -> bool:
         _validate_target_name(environment)

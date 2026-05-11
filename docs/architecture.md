@@ -42,9 +42,12 @@ deployer services list
 deployer services show myapp
 deployer services remove myapp
 deployer refs myapp
+deployer environments list
+deployer environments add stage --url-prefix stage
+deployer environments update dev --deploy-mode webhook_auto --deploy-source branch --deploy-pattern dev --pattern-type exact
+deployer environments remove stage
 deployer runtime-targets list myapp
-deployer runtime-targets add myapp stage --url-prefix stage
-deployer runtime-targets update myapp dev --deploy-mode webhook_auto --deploy-source branch --deploy-pattern dev --pattern-type exact
+deployer runtime-targets add myapp stage
 deployer runtime-targets remove myapp stage
 deployer env list myapp prod
 deployer env set myapp prod KEY=value
@@ -115,10 +118,13 @@ Path mode:
 8. Mark deployment as `success` or `failed`.
 9. Persist command log.
 
-Runtime targets are arbitrary per service. `prod` and `dev` are created as defaults for existing workflows, but
-operators can create additional targets such as `stage`, `preview-123`, or project-specific names.
+Environment profiles are global platform-level definitions. `prod` and `dev` are created as defaults for existing
+workflows, but operators can create additional profiles such as `stage`, `preview-123`, or project-specific names.
 
-Routing uses per-target `url_prefix`:
+Service runtime targets are per-service enablements of these profiles. They store runtime state such as env vars,
+current ref/commit, last deployment, jobs, and logs.
+
+Routing uses the profile `url_prefix`:
 
 - empty prefix -> `<subdomain>.<domain>`
 - `dev` -> `<subdomain>.dev.<domain>`

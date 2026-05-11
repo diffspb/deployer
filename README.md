@@ -55,15 +55,16 @@ Current implementation includes the deployer engine and the first service catalo
 - Managed runtime layout under `/var/lib/deployer/services/<name>/`.
 - Environment variable storage and generated env files.
 - FastAPI JSON API and a minimal Web UI.
-- Dynamic runtime targets with per-target URL prefixes and deployment policies.
+- Global environment profiles with per-service runtime targets.
 
 Catalog workflow:
 
 ```bash
 deployer services add myapp --git-url <url> --state-db /var/lib/deployer/state.db
 deployer services add-local myapp --path /path/to/project --state-db /var/lib/deployer/state.db
-deployer runtime-targets add myapp stage --url-prefix stage --state-db /var/lib/deployer/state.db
-deployer runtime-targets update myapp dev --deploy-mode webhook_auto --deploy-source branch --deploy-pattern dev --pattern-type exact --state-db /var/lib/deployer/state.db
+deployer environments add stage --url-prefix stage --state-db /var/lib/deployer/state.db
+deployer environments update dev --deploy-mode webhook_auto --deploy-source branch --deploy-pattern dev --pattern-type exact --state-db /var/lib/deployer/state.db
+deployer runtime-targets add myapp stage --state-db /var/lib/deployer/state.db
 deployer runtime-targets list myapp --state-db /var/lib/deployer/state.db
 deployer env set myapp prod KEY=value --state-db /var/lib/deployer/state.db
 deployer deploy myapp --environment prod --ref main --state-db /var/lib/deployer/state.db

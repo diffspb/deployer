@@ -16,7 +16,7 @@ from deployer.engine import DeploymentEngine
 from deployer.errors import DeployerError
 from deployer.manifest import Manifest, load_manifest
 from deployer.override import render_override, route_host
-from deployer.state import DeploymentRecord, EnvironmentRecord, JobRecord, ServiceRecord, StateStore
+from deployer.state import DeploymentRecord, EnvironmentProfileRecord, EnvironmentRecord, JobRecord, ServiceRecord, StateStore
 
 
 class AddServiceRequest(BaseModel):
@@ -41,6 +41,10 @@ class RuntimeRequest(BaseModel):
 
 class RuntimeTargetRequest(BaseModel):
     name: str
+
+
+class EnvironmentProfileRequest(BaseModel):
+    name: str
     url_prefix: str | None = None
     deploy_mode: str = "manual"
     deploy_source: str | None = None
@@ -48,7 +52,7 @@ class RuntimeTargetRequest(BaseModel):
     deploy_pattern_type: str | None = None
 
 
-class RuntimeTargetUpdateRequest(BaseModel):
+class EnvironmentProfileUpdateRequest(BaseModel):
     url_prefix: str | None = None
     deploy_mode: str | None = None
     deploy_source: str | None = None
@@ -112,6 +116,45 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Unknown service: {name}")
         return {"removed": True, "service": name}
 
+    @app.get("/api/environments")
+    def list_environment_profiles(catalog: CatalogDep) -> dict:
+        return {"environments": [_environment_profile_payload(profile) for profile in catalog.list_environment_profiles()]}
+
+    @app.post("/api/environments", status_code=201)
+    def add_environment_profile(payload: EnvironmentProfileRequest, catalog: CatalogDep) -> dict:
+        profile = catalog.add_environment_profile(
+            payload.name,
+            url_prefix=payload.url_prefix,
+            deploy_mode=payload.deploy_mode,
+            deploy_source=payload.deploy_source,
+            deploy_pattern=payload.deploy_pattern,
+            deploy_pattern_type=payload.deploy_pattern_type,
+        )
+        return {"environment": _environment_profile_payload(profile)}
+
+    @app.patch("/api/environments/{environment}")
+    def update_environment_profile(
+        environment: str,
+        payload: EnvironmentProfileUpdateRequest,
+        catalog: CatalogDep,
+    ) -> dict:
+        profile = catalog.update_environment_profile(
+            environment,
+            url_prefix=payload.url_prefix,
+            deploy_mode=payload.deploy_mode,
+            deploy_source=payload.deploy_source,
+            deploy_pattern=payload.deploy_pattern,
+            deploy_pattern_type=payload.deploy_pattern_type,
+        )
+        return {"environment": _environment_profile_payload(profile)}
+
+    @app.delete("/api/environments/{environment}")
+    def delete_environment_profile(environment: str, catalog: CatalogDep) -> dict:
+        removed = catalog.remove_environment_profile(environment)
+        if not removed:
+            raise HTTPException(status_code=404, detail=f"Unknown environment profile: {environment}")
+        return {"removed": True, "environment": environment}
+
     @app.get("/api/services/{name}/refs")
     def refs(name: str, catalog: CatalogDep) -> dict:
         raw = catalog.refs(name)
@@ -123,33 +166,7 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
 
     @app.post("/api/services/{name}/runtime-targets", status_code=201)
     def add_runtime_target(name: str, payload: RuntimeTargetRequest, catalog: CatalogDep) -> dict:
-        env = catalog.add_environment(
-            name,
-            payload.name,
-            url_prefix=payload.url_prefix,
-            deploy_mode=payload.deploy_mode,
-            deploy_source=payload.deploy_source,
-            deploy_pattern=payload.deploy_pattern,
-            deploy_pattern_type=payload.deploy_pattern_type,
-        )
-        return {"service": name, "runtime_target": _environment_payload(env)}
-
-    @app.patch("/api/services/{name}/runtime-targets/{environment}")
-    def update_runtime_target(
-        name: str,
-        environment: str,
-        payload: RuntimeTargetUpdateRequest,
-        catalog: CatalogDep,
-    ) -> dict:
-        env = catalog.update_environment(
-            name,
-            environment,
-            url_prefix=payload.url_prefix,
-            deploy_mode=payload.deploy_mode,
-            deploy_source=payload.deploy_source,
-            deploy_pattern=payload.deploy_pattern,
-            deploy_pattern_type=payload.deploy_pattern_type,
-        )
+        env = catalog.add_environment(name, payload.name)
         return {"service": name, "runtime_target": _environment_payload(env)}
 
     @app.delete("/api/services/{name}/runtime-targets/{environment}")
@@ -298,6 +315,19 @@ def _environment_payload(env: EnvironmentRecord, public_url: str | None = None) 
         "current_ref": env.current_ref,
         "current_commit": env.current_commit,
         "last_deployment_id": env.last_deployment_id,
+    }
+
+
+def _environment_profile_payload(profile: EnvironmentProfileRecord) -> dict:
+    return {
+        "name": profile.name,
+        "url_prefix": profile.url_prefix,
+        "deploy_mode": profile.deploy_mode,
+        "deploy_source": profile.deploy_source,
+        "deploy_pattern": profile.deploy_pattern,
+        "deploy_pattern_type": profile.deploy_pattern_type,
+        "created_at": profile.created_at,
+        "updated_at": profile.updated_at,
     }
 
 

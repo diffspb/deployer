@@ -33,6 +33,18 @@ class ServiceRecord:
 
 
 @dataclass(frozen=True)
+class EnvironmentProfileRecord:
+    name: str
+    url_prefix: str
+    deploy_mode: str
+    deploy_source: str | None
+    deploy_pattern: str | None
+    deploy_pattern_type: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class EnvironmentRecord:
     id: int
     service_id: int
@@ -211,16 +223,13 @@ class StateStore:
             )
             service_id = int(cursor.lastrowid)
             for environment in ("prod", "dev"):
+                _ensure_environment_profile(conn, environment, _default_url_prefix(environment), now)
                 conn.execute(
                     """
-                    INSERT INTO environments(
-                        service_id, name, subdomain, url_prefix,
-                        deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
-                        env_vars_json, created_at, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, 'manual', NULL, NULL, NULL, '{}', ?, ?)
+                    INSERT INTO environments(service_id, name, subdomain, env_vars_json, created_at, updated_at)
+                    VALUES (?, ?, ?, '{}', ?, ?)
                     """,
-                    (service_id, environment, name, _default_url_prefix(environment), now, now),
+                    (service_id, environment, name, now, now),
                 )
         return self.require_service(name)
 
@@ -258,17 +267,126 @@ class StateStore:
             cursor = conn.execute("DELETE FROM services WHERE name = ?", (name,))
             return cursor.rowcount > 0
 
+    def list_environment_profiles(self) -> list[EnvironmentProfileRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT name, url_prefix, deploy_mode, deploy_source, deploy_pattern,
+                       deploy_pattern_type, created_at, updated_at
+                FROM environment_profiles
+                ORDER BY CASE name WHEN 'prod' THEN 0 WHEN 'dev' THEN 1 ELSE 2 END, name
+                """
+            ).fetchall()
+        return [EnvironmentProfileRecord(*row) for row in rows]
+
+    def get_environment_profile(self, name: str) -> EnvironmentProfileRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT name, url_prefix, deploy_mode, deploy_source, deploy_pattern,
+                       deploy_pattern_type, created_at, updated_at
+                FROM environment_profiles
+                WHERE name = ?
+                """,
+                (name,),
+            ).fetchone()
+        return EnvironmentProfileRecord(*row) if row else None
+
+    def require_environment_profile(self, name: str) -> EnvironmentProfileRecord:
+        profile = self.get_environment_profile(name)
+        if profile is None:
+            raise KeyError(name)
+        return profile
+
+    def add_environment_profile(
+        self,
+        name: str,
+        url_prefix: str | None = None,
+        deploy_mode: str = "manual",
+        deploy_source: str | None = None,
+        deploy_pattern: str | None = None,
+        deploy_pattern_type: str | None = None,
+    ) -> EnvironmentProfileRecord:
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO environment_profiles(
+                    name, url_prefix, deploy_mode, deploy_source, deploy_pattern,
+                    deploy_pattern_type, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    name,
+                    _default_url_prefix(name) if url_prefix is None else url_prefix,
+                    deploy_mode,
+                    deploy_source,
+                    deploy_pattern,
+                    deploy_pattern_type,
+                    now,
+                    now,
+                ),
+            )
+        return self.require_environment_profile(name)
+
+    def update_environment_profile(
+        self,
+        name: str,
+        url_prefix: str | None = None,
+        deploy_mode: str | None = None,
+        deploy_source: str | None = None,
+        deploy_pattern: str | None = None,
+        deploy_pattern_type: str | None = None,
+    ) -> EnvironmentProfileRecord:
+        record = self.require_environment_profile(name)
+        values = {
+            "url_prefix": record.url_prefix if url_prefix is None else url_prefix,
+            "deploy_mode": record.deploy_mode if deploy_mode is None else deploy_mode,
+            "deploy_source": record.deploy_source if deploy_source is None else deploy_source,
+            "deploy_pattern": record.deploy_pattern if deploy_pattern is None else deploy_pattern,
+            "deploy_pattern_type": record.deploy_pattern_type if deploy_pattern_type is None else deploy_pattern_type,
+        }
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE environment_profiles
+                SET url_prefix = ?, deploy_mode = ?, deploy_source = ?,
+                    deploy_pattern = ?, deploy_pattern_type = ?, updated_at = ?
+                WHERE name = ?
+                """,
+                (
+                    values["url_prefix"],
+                    values["deploy_mode"],
+                    values["deploy_source"],
+                    values["deploy_pattern"],
+                    values["deploy_pattern_type"],
+                    _now(),
+                    name,
+                ),
+            )
+        return self.require_environment_profile(name)
+
+    def remove_environment_profile(self, name: str) -> bool:
+        with self._connect() as conn:
+            used = conn.execute("SELECT 1 FROM environments WHERE name = ? LIMIT 1", (name,)).fetchone()
+            if used:
+                raise ValueError(f"Environment profile is in use: {name}")
+            cursor = conn.execute("DELETE FROM environment_profiles WHERE name = ?", (name,))
+            return cursor.rowcount > 0
+
     def list_environments(self, service_name: str) -> list[EnvironmentRecord]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT e.id, e.service_id, e.name, e.subdomain, e.url_prefix,
-                       e.deploy_mode, e.deploy_source, e.deploy_pattern, e.deploy_pattern_type,
+                SELECT e.id, e.service_id, e.name, e.subdomain,
+                       p.url_prefix, p.deploy_mode, p.deploy_source, p.deploy_pattern, p.deploy_pattern_type,
                        e.env_vars_json,
                        e.current_version, e.current_ref, e.current_commit,
                        e.last_deployment_id, e.created_at, e.updated_at
                 FROM environments e
                 JOIN services s ON s.id = e.service_id
+                JOIN environment_profiles p ON p.name = e.name
                 WHERE s.name = ?
                 ORDER BY
                     CASE e.name WHEN 'prod' THEN 0 WHEN 'dev' THEN 1 ELSE 2 END,
@@ -282,74 +400,17 @@ class StateStore:
         self,
         service_name: str,
         environment: str,
-        url_prefix: str | None = None,
-        deploy_mode: str = "manual",
-        deploy_source: str | None = None,
-        deploy_pattern: str | None = None,
-        deploy_pattern_type: str | None = None,
     ) -> EnvironmentRecord:
         service = self.require_service(service_name)
+        self.require_environment_profile(environment)
         now = _now()
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO environments(
-                    service_id, name, subdomain, url_prefix,
-                    deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
-                    env_vars_json, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
+                INSERT INTO environments(service_id, name, subdomain, env_vars_json, created_at, updated_at)
+                VALUES (?, ?, ?, '{}', ?, ?)
                 """,
-                (
-                    service.id,
-                    environment,
-                    service.name,
-                    _default_url_prefix(environment) if url_prefix is None else url_prefix,
-                    deploy_mode,
-                    deploy_source,
-                    deploy_pattern,
-                    deploy_pattern_type,
-                    now,
-                    now,
-                ),
-            )
-        return self.require_environment(service_name, environment)
-
-    def update_environment(
-        self,
-        service_name: str,
-        environment: str,
-        url_prefix: str | None = None,
-        deploy_mode: str | None = None,
-        deploy_source: str | None = None,
-        deploy_pattern: str | None = None,
-        deploy_pattern_type: str | None = None,
-    ) -> EnvironmentRecord:
-        record = self.require_environment(service_name, environment)
-        values = {
-            "url_prefix": record.url_prefix if url_prefix is None else url_prefix,
-            "deploy_mode": record.deploy_mode if deploy_mode is None else deploy_mode,
-            "deploy_source": record.deploy_source if deploy_source is None else deploy_source,
-            "deploy_pattern": record.deploy_pattern if deploy_pattern is None else deploy_pattern,
-            "deploy_pattern_type": record.deploy_pattern_type if deploy_pattern_type is None else deploy_pattern_type,
-        }
-        with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE environments
-                SET url_prefix = ?, deploy_mode = ?, deploy_source = ?,
-                    deploy_pattern = ?, deploy_pattern_type = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (
-                    values["url_prefix"],
-                    values["deploy_mode"],
-                    values["deploy_source"],
-                    values["deploy_pattern"],
-                    values["deploy_pattern_type"],
-                    _now(),
-                    record.id,
-                ),
+                (service.id, environment, service.name, now, now),
             )
         return self.require_environment(service_name, environment)
 
@@ -373,13 +434,14 @@ class StateStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT e.id, e.service_id, e.name, e.subdomain, e.url_prefix,
-                       e.deploy_mode, e.deploy_source, e.deploy_pattern, e.deploy_pattern_type,
+                SELECT e.id, e.service_id, e.name, e.subdomain,
+                       p.url_prefix, p.deploy_mode, p.deploy_source, p.deploy_pattern, p.deploy_pattern_type,
                        e.env_vars_json,
                        e.current_version, e.current_ref, e.current_commit,
                        e.last_deployment_id, e.created_at, e.updated_at
                 FROM environments e
                 JOIN services s ON s.id = e.service_id
+                JOIN environment_profiles p ON p.name = e.name
                 WHERE s.name = ? AND e.name = ?
                 """,
                 (service_name, environment),
@@ -528,6 +590,23 @@ class StateStore:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS environment_profiles (
+                    name TEXT PRIMARY KEY,
+                    url_prefix TEXT NOT NULL DEFAULT '',
+                    deploy_mode TEXT NOT NULL DEFAULT 'manual',
+                    deploy_source TEXT,
+                    deploy_pattern TEXT,
+                    deploy_pattern_type TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            now = _now()
+            _ensure_environment_profile(conn, "prod", "", now)
+            _ensure_environment_profile(conn, "dev", "dev", now)
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS environments (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     service_id INTEGER NOT NULL,
@@ -555,6 +634,25 @@ class StateStore:
             _ensure_column(conn, "environments", "deploy_source", "TEXT")
             _ensure_column(conn, "environments", "deploy_pattern", "TEXT")
             _ensure_column(conn, "environments", "deploy_pattern_type", "TEXT")
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO environment_profiles(
+                    name, url_prefix, deploy_mode, deploy_source, deploy_pattern,
+                    deploy_pattern_type, created_at, updated_at
+                )
+                SELECT DISTINCT
+                    name,
+                    COALESCE(url_prefix, CASE name WHEN 'prod' THEN '' ELSE name END),
+                    COALESCE(deploy_mode, 'manual'),
+                    deploy_source,
+                    deploy_pattern,
+                    deploy_pattern_type,
+                    COALESCE(created_at, ?),
+                    COALESCE(updated_at, ?)
+                FROM environments
+                """,
+                (now, now),
+            )
             conn.execute(
                 """
                 UPDATE environments
@@ -605,6 +703,19 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
     existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in existing:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _ensure_environment_profile(conn: sqlite3.Connection, name: str, url_prefix: str, now: str) -> None:
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO environment_profiles(
+            name, url_prefix, deploy_mode, deploy_source, deploy_pattern,
+            deploy_pattern_type, created_at, updated_at
+        )
+        VALUES (?, ?, 'manual', NULL, NULL, NULL, ?, ?)
+        """,
+        (name, url_prefix, now, now),
+    )
 
 
 def _environment_record(row) -> EnvironmentRecord:
