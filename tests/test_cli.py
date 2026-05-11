@@ -379,6 +379,192 @@ def test_cli_service_catalog_local_workflow(tmp_path: Path, capsys):
     assert "removed" in capsys.readouterr().out
 
 
+def test_cli_environment_project_workflow(tmp_path: Path, capsys):
+    source = tmp_path / "source"
+    source.mkdir()
+    state_db = tmp_path / "state.db"
+    runtime_dir = tmp_path / "runtime"
+
+    assert (
+        main(
+            [
+                "projects",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "add-local",
+                "dev",
+                "tasktrack",
+                "--path",
+                str(source),
+                "--default-ref",
+                "dev",
+                "--deploy-mode",
+                "webhook_auto",
+                "--deploy-source",
+                "branch",
+                "--deploy-pattern",
+                "dev",
+                "--pattern-type",
+                "exact",
+            ]
+        )
+        == 0
+    )
+    assert "added\tdev\ttasktrack\tlocal" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "components",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "add",
+                "dev",
+                "tasktrack",
+                "backend",
+                "--mode",
+                "build",
+                "--build-context",
+                "backend",
+                "--dockerfile",
+                "Dockerfile",
+                "--port",
+                "8000",
+            ]
+        )
+        == 0
+    )
+    assert "added\tdev\ttasktrack\tbackend\tbuild" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "endpoints",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "add",
+                "dev",
+                "tasktrack",
+                "api",
+                "backend",
+                "--port",
+                "8000",
+                "--subdomain",
+                "api.tasktrack",
+                "--auth",
+                "sso",
+                "--health-path",
+                "/api/v1/health",
+            ]
+        )
+        == 0
+    )
+    assert "added\tdev\ttasktrack\tapi\tbackend\t8000" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "dependencies",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "add",
+                "dev",
+                "tasktrack",
+                "postgres",
+                "--type",
+                "postgres",
+                "--target",
+                "postgres-main/tasktrack_dev",
+                "--output",
+                "DATABASE_URL=postgresql://tasktrack_dev@example/tasktrack_dev",
+            ]
+        )
+        == 0
+    )
+    assert "postgres-main/tasktrack_dev" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "projects",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "env-set",
+                "dev",
+                "tasktrack",
+                "APP_ENV=dev",
+            ]
+        )
+        == 0
+    )
+    assert "APP_ENV" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "projects",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "show",
+                "dev",
+                "tasktrack",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "environment: dev" in output
+    assert "component: backend" in output
+    assert "endpoint: api" in output
+    assert "dependency: postgres" in output
+
+    assert (
+        main(
+            [
+                "projects",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "env-render",
+                "dev",
+                "tasktrack",
+            ]
+        )
+        == 0
+    )
+    assert "project.env" in capsys.readouterr().out
+
+
+def test_cli_uses_config_defaults_for_catalog_commands(tmp_path: Path, capsys, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    state_db = tmp_path / "configured-state.db"
+    runtime_dir = tmp_path / "configured-runtime"
+    monkeypatch.setenv("DEPLOYER_STATE_DB", str(state_db))
+    monkeypatch.setenv("DEPLOYER_RUNTIME_DIR", str(runtime_dir))
+
+    assert main(["projects", "add-local", "dev", "myapp", "--path", str(source)]) == 0
+    assert "added\tdev\tmyapp" in capsys.readouterr().out
+
+    assert main(["projects", "list", "dev"]) == 0
+    output = capsys.readouterr().out
+    assert "dev\tmyapp\tlocal" in output
+    assert state_db.exists()
+
+
 def test_cli_env_set_requires_assignment(tmp_path: Path, capsys):
     project = _project(tmp_path / "project")
     state_db = tmp_path / "state.db"

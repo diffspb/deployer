@@ -69,14 +69,21 @@ deployable service that later gets attached to `dev`, `stage`, or `prod`. If the
 repository should run in two environments, it is added twice, for example
 `dev/tasktrack` and `prod/tasktrack`.
 
-Target workflow:
+Implemented environment-project configuration commands:
 
 ```bash
 deployer environments add dev --url-prefix dev
 deployer projects add dev myapp --git-url <url>
 deployer components add dev myapp backend --build-context backend --dockerfile Dockerfile --port 8000
-deployer endpoints add dev myapp backend --subdomain myapp --auth sso --health-path /health
-deployer env set dev myapp KEY=value
+deployer endpoints add dev myapp web backend --port 8000 --subdomain myapp --auth sso --health-path /health
+deployer dependencies add dev myapp postgres --type postgres --target postgres-main/myapp_dev --output DATABASE_URL=postgresql://...
+deployer projects env-set dev myapp KEY=value
+deployer projects show dev myapp
+```
+
+Target runtime commands after the engine refactor:
+
+```bash
 deployer deploy dev myapp --ref dev
 deployer history dev myapp
 deployer status dev myapp

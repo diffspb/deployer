@@ -4,7 +4,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from deployer.catalog import DEFAULT_RUNTIME_DIR, ServiceCatalog
+from deployer.catalog import ServiceCatalog
+from deployer.config import load_config
 from deployer.engine import DeploymentEngine
 from deployer.errors import DeployerError
 from deployer.manifest import load_manifest
@@ -21,6 +22,22 @@ def main(argv: list[str] | None = None) -> int:
             state = StateStore(args.state_db)
             catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
             return _handle_services(args, catalog)
+        if args.command == "projects":
+            state = StateStore(args.state_db)
+            catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+            return _handle_projects(args, catalog)
+        if args.command == "components":
+            state = StateStore(args.state_db)
+            catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+            return _handle_components(args, catalog)
+        if args.command == "endpoints":
+            state = StateStore(args.state_db)
+            catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+            return _handle_endpoints(args, catalog)
+        if args.command == "dependencies":
+            state = StateStore(args.state_db)
+            catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+            return _handle_dependencies(args, catalog)
         if args.command == "env":
             state = StateStore(args.state_db)
             catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
@@ -218,6 +235,164 @@ def _handle_runtime_targets(args: argparse.Namespace, catalog: ServiceCatalog) -
     raise DeployerError("Unknown runtime-targets command")
 
 
+def _handle_projects(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
+    if args.projects_command == "add-local":
+        project = catalog.add_project_local(
+            args.environment,
+            args.name,
+            args.path,
+            default_ref=args.default_ref,
+            deploy_mode=args.deploy_mode,
+            deploy_source=args.deploy_source,
+            deploy_pattern=args.deploy_pattern,
+            deploy_pattern_type=args.pattern_type,
+        )
+        print(f"added\t{project.environment}\t{project.name}\t{project.source_type}\t{project.source_path}")
+        return 0
+    if args.projects_command == "add":
+        project = catalog.add_project_git(
+            args.environment,
+            args.name,
+            args.git_url,
+            default_ref=args.default_ref,
+            deploy_mode=args.deploy_mode,
+            deploy_source=args.deploy_source,
+            deploy_pattern=args.deploy_pattern,
+            deploy_pattern_type=args.pattern_type,
+        )
+        print(f"added\t{project.environment}\t{project.name}\t{project.source_type}\t{project.source_url}")
+        return 0
+    if args.projects_command == "list":
+        for project in catalog.list_projects(args.environment):
+            print(
+                f"{project.environment}\t{project.name}\t{project.source_type}\t"
+                f"{project.source_url or project.source_path}\tref={project.current_ref or project.default_ref or '-'}"
+            )
+        return 0
+    if args.projects_command == "show":
+        config = catalog.project_config(args.environment, args.name)
+        project = config.project
+        print(f"environment: {project.environment}")
+        print(f"name: {project.name}")
+        print(f"source_type: {project.source_type}")
+        print(f"source_url: {project.source_url or '-'}")
+        print(f"source_path: {project.source_path}")
+        print(f"default_ref: {project.default_ref or '-'}")
+        print(f"deploy_mode: {project.deploy_mode}")
+        print(f"deploy_source: {project.deploy_source or '-'}")
+        print(f"deploy_pattern: {project.deploy_pattern or '-'}")
+        print(f"current_ref: {project.current_ref or '-'}")
+        print(f"current_commit: {project.current_commit or '-'}")
+        for component in config.components:
+            print(f"component: {component.name}\tmode={component.mode}\tport={component.port or '-'}")
+        for endpoint in config.endpoints:
+            print(
+                f"endpoint: {endpoint.name}\tcomponent={endpoint.component}\t"
+                f"subdomain={endpoint.subdomain or '-'}\tauth={endpoint.auth}"
+            )
+        for dependency in config.dependencies:
+            print(f"dependency: {dependency.name}\ttype={dependency.type}\ttarget={dependency.target}")
+        return 0
+    if args.projects_command == "remove":
+        removed = catalog.remove_project(args.environment, args.name, delete_files=args.delete_files)
+        print("removed" if removed else "not found")
+        return 0 if removed else 1
+    if args.projects_command == "env-list":
+        project = catalog.get_project(args.environment, args.name)
+        for key, value in sorted(project.env_vars.items()):
+            print(f"{key}={value}")
+        return 0
+    if args.projects_command == "env-set":
+        key, sep, value = args.assignment.partition("=")
+        if not sep:
+            raise DeployerError("Assignment must use KEY=value format")
+        catalog.set_project_env(args.environment, args.name, key, value)
+        print(f"set\t{args.environment}\t{args.name}\t{key}")
+        return 0
+    if args.projects_command == "env-unset":
+        catalog.unset_project_env(args.environment, args.name, args.key)
+        print(f"unset\t{args.environment}\t{args.name}\t{args.key}")
+        return 0
+    if args.projects_command == "env-render":
+        print(catalog.render_project_env_file(args.environment, args.name))
+        return 0
+    raise DeployerError("Unknown projects command")
+
+
+def _handle_components(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
+    if args.components_command == "add":
+        component = catalog.add_component(
+            args.environment,
+            args.project,
+            args.name,
+            mode=args.mode,
+            compose_service=args.compose_service,
+            build_context=args.build_context,
+            dockerfile=args.dockerfile,
+            image=args.image,
+            command=args.component_command_value,
+            port=args.port,
+        )
+        print(f"added\t{args.environment}\t{args.project}\t{component.name}\t{component.mode}")
+        return 0
+    if args.components_command == "list":
+        for component in catalog.state.list_components(args.environment, args.project):
+            print(
+                f"{component.name}\tmode={component.mode}\tcompose_service={component.compose_service or '-'}\t"
+                f"build_context={component.build_context or '-'}\timage={component.image or '-'}\tport={component.port or '-'}"
+            )
+        return 0
+    raise DeployerError("Unknown components command")
+
+
+def _handle_endpoints(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
+    if args.endpoints_command == "add":
+        endpoint = catalog.add_endpoint(
+            args.environment,
+            args.project,
+            args.name,
+            args.component,
+            args.port,
+            host=args.host,
+            subdomain=args.subdomain,
+            path_prefix=args.path_prefix,
+            auth=args.auth,
+            middlewares=tuple(args.middleware or ()),
+            healthcheck_path=args.health_path,
+        )
+        print(f"added\t{args.environment}\t{args.project}\t{endpoint.name}\t{endpoint.component}\t{endpoint.port}")
+        return 0
+    if args.endpoints_command == "list":
+        for endpoint in catalog.state.list_endpoints(args.environment, args.project):
+            print(
+                f"{endpoint.name}\tcomponent={endpoint.component}\tport={endpoint.port}\t"
+                f"host={endpoint.host or '-'}\tsubdomain={endpoint.subdomain or '-'}\tauth={endpoint.auth}"
+            )
+        return 0
+    raise DeployerError("Unknown endpoints command")
+
+
+def _handle_dependencies(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
+    if args.dependencies_command == "add":
+        outputs = _parse_assignments(args.output or [])
+        dependency = catalog.add_dependency(
+            args.environment,
+            args.project,
+            args.name,
+            args.type,
+            args.target,
+            outputs=outputs,
+        )
+        print(f"added\t{args.environment}\t{args.project}\t{dependency.name}\t{dependency.type}\t{dependency.target}")
+        return 0
+    if args.dependencies_command == "list":
+        for dependency in catalog.state.list_dependencies(args.environment, args.project):
+            outputs = ",".join(f"{key}={value}" for key, value in sorted(dependency.outputs.items())) or "-"
+            print(f"{dependency.name}\ttype={dependency.type}\ttarget={dependency.target}\toutputs={outputs}")
+        return 0
+    raise DeployerError("Unknown dependencies command")
+
+
 def _handle_environments(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
     if args.environments_command == "list":
         for profile in catalog.list_environment_profiles():
@@ -302,7 +477,18 @@ def _format_history_record(record) -> str:
     )
 
 
+def _parse_assignments(assignments: list[str]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for assignment in assignments:
+        key, sep, value = assignment.partition("=")
+        if not sep:
+            raise DeployerError("Assignment must use KEY=value format")
+        values[key] = value
+    return values
+
+
 def _parser() -> argparse.ArgumentParser:
+    config = load_config()
     parser = argparse.ArgumentParser(prog="deployer")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -317,8 +503,8 @@ def _parser() -> argparse.ArgumentParser:
 
     deploy = subparsers.add_parser("deploy")
     deploy.add_argument("target")
-    deploy.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
-    deploy.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    deploy.add_argument("--state-db", type=Path, default=config.state_db)
+    deploy.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     deploy.add_argument("--manifest", type=Path)
     deploy.add_argument("--version")
     deploy.add_argument("--ref")
@@ -327,53 +513,53 @@ def _parser() -> argparse.ArgumentParser:
 
     stop = subparsers.add_parser("stop")
     stop.add_argument("target")
-    stop.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
-    stop.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    stop.add_argument("--state-db", type=Path, default=config.state_db)
+    stop.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     stop.add_argument("--manifest", type=Path)
     stop.add_argument("--environment", default="prod")
     stop.add_argument("--dry-run", action="store_true")
 
     down = subparsers.add_parser("down")
     down.add_argument("target")
-    down.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
-    down.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    down.add_argument("--state-db", type=Path, default=config.state_db)
+    down.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     down.add_argument("--manifest", type=Path)
     down.add_argument("--environment", default="prod")
     down.add_argument("--dry-run", action="store_true")
 
     restart = subparsers.add_parser("restart")
     restart.add_argument("target")
-    restart.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
-    restart.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    restart.add_argument("--state-db", type=Path, default=config.state_db)
+    restart.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     restart.add_argument("--manifest", type=Path)
     restart.add_argument("--environment", default="prod")
     restart.add_argument("--dry-run", action="store_true")
 
     status = subparsers.add_parser("status")
     status.add_argument("target")
-    status.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
-    status.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    status.add_argument("--state-db", type=Path, default=config.state_db)
+    status.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     status.add_argument("--manifest", type=Path)
     status.add_argument("--environment", default="prod")
 
     logs = subparsers.add_parser("logs")
     logs.add_argument("target")
-    logs.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
-    logs.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    logs.add_argument("--state-db", type=Path, default=config.state_db)
+    logs.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     logs.add_argument("--manifest", type=Path)
     logs.add_argument("--environment", default="prod")
     logs.add_argument("--tail", type=int, default=200)
 
     history = subparsers.add_parser("history")
     history.add_argument("project")
-    history.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
-    history.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    history.add_argument("--state-db", type=Path, default=config.state_db)
+    history.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     history.add_argument("--environment")
     history.add_argument("--limit", type=int, default=20)
 
     services = subparsers.add_parser("services")
-    services.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
-    services.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    services.add_argument("--state-db", type=Path, default=config.state_db)
+    services.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     services_subparsers = services.add_subparsers(dest="services_command", required=True)
 
     services_add = services_subparsers.add_parser("add")
@@ -401,12 +587,12 @@ def _parser() -> argparse.ArgumentParser:
 
     refs = subparsers.add_parser("refs")
     refs.add_argument("service")
-    refs.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
-    refs.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    refs.add_argument("--state-db", type=Path, default=config.state_db)
+    refs.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
 
     environments = subparsers.add_parser("environments")
-    environments.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
-    environments.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    environments.add_argument("--state-db", type=Path, default=config.state_db)
+    environments.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     environments_subparsers = environments.add_subparsers(dest="environments_command", required=True)
 
     environments_list = environments_subparsers.add_parser("list")
@@ -434,9 +620,133 @@ def _parser() -> argparse.ArgumentParser:
     _add_catalog_options(environments_remove)
     environments_remove.add_argument("name")
 
+    projects = subparsers.add_parser("projects")
+    projects.add_argument("--state-db", type=Path, default=config.state_db)
+    projects.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
+    projects_subparsers = projects.add_subparsers(dest="projects_command", required=True)
+
+    projects_add = projects_subparsers.add_parser("add")
+    _add_catalog_options(projects_add)
+    projects_add.add_argument("environment")
+    projects_add.add_argument("name")
+    projects_add.add_argument("--git-url", required=True)
+    projects_add.add_argument("--default-ref")
+    _add_deploy_policy_options(projects_add)
+
+    projects_add_local = projects_subparsers.add_parser("add-local")
+    _add_catalog_options(projects_add_local)
+    projects_add_local.add_argument("environment")
+    projects_add_local.add_argument("name")
+    projects_add_local.add_argument("--path", type=Path, required=True)
+    projects_add_local.add_argument("--default-ref")
+    _add_deploy_policy_options(projects_add_local)
+
+    projects_list = projects_subparsers.add_parser("list")
+    _add_catalog_options(projects_list)
+    projects_list.add_argument("environment", nargs="?")
+
+    projects_show = projects_subparsers.add_parser("show")
+    _add_catalog_options(projects_show)
+    projects_show.add_argument("environment")
+    projects_show.add_argument("name")
+
+    projects_remove = projects_subparsers.add_parser("remove")
+    _add_catalog_options(projects_remove)
+    projects_remove.add_argument("environment")
+    projects_remove.add_argument("name")
+    projects_remove.add_argument("--delete-files", action="store_true")
+
+    projects_env_list = projects_subparsers.add_parser("env-list")
+    _add_catalog_options(projects_env_list)
+    projects_env_list.add_argument("environment")
+    projects_env_list.add_argument("name")
+
+    projects_env_set = projects_subparsers.add_parser("env-set")
+    _add_catalog_options(projects_env_set)
+    projects_env_set.add_argument("environment")
+    projects_env_set.add_argument("name")
+    projects_env_set.add_argument("assignment")
+
+    projects_env_unset = projects_subparsers.add_parser("env-unset")
+    _add_catalog_options(projects_env_unset)
+    projects_env_unset.add_argument("environment")
+    projects_env_unset.add_argument("name")
+    projects_env_unset.add_argument("key")
+
+    projects_env_render = projects_subparsers.add_parser("env-render")
+    _add_catalog_options(projects_env_render)
+    projects_env_render.add_argument("environment")
+    projects_env_render.add_argument("name")
+
+    components = subparsers.add_parser("components")
+    components.add_argument("--state-db", type=Path, default=config.state_db)
+    components.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
+    components_subparsers = components.add_subparsers(dest="components_command", required=True)
+
+    components_add = components_subparsers.add_parser("add")
+    _add_catalog_options(components_add)
+    components_add.add_argument("environment")
+    components_add.add_argument("project")
+    components_add.add_argument("name")
+    components_add.add_argument("--mode", default="compose", choices=["compose", "build", "image"])
+    components_add.add_argument("--compose-service")
+    components_add.add_argument("--build-context")
+    components_add.add_argument("--dockerfile")
+    components_add.add_argument("--image")
+    components_add.add_argument("--command", dest="component_command_value")
+    components_add.add_argument("--port", type=int)
+
+    components_list = components_subparsers.add_parser("list")
+    _add_catalog_options(components_list)
+    components_list.add_argument("environment")
+    components_list.add_argument("project")
+
+    endpoints = subparsers.add_parser("endpoints")
+    endpoints.add_argument("--state-db", type=Path, default=config.state_db)
+    endpoints.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
+    endpoints_subparsers = endpoints.add_subparsers(dest="endpoints_command", required=True)
+
+    endpoints_add = endpoints_subparsers.add_parser("add")
+    _add_catalog_options(endpoints_add)
+    endpoints_add.add_argument("environment")
+    endpoints_add.add_argument("project")
+    endpoints_add.add_argument("name")
+    endpoints_add.add_argument("component")
+    endpoints_add.add_argument("--port", type=int, required=True)
+    endpoints_add.add_argument("--host")
+    endpoints_add.add_argument("--subdomain")
+    endpoints_add.add_argument("--path-prefix")
+    endpoints_add.add_argument("--auth", default="none", choices=["none", "sso"])
+    endpoints_add.add_argument("--middleware", action="append")
+    endpoints_add.add_argument("--health-path")
+
+    endpoints_list = endpoints_subparsers.add_parser("list")
+    _add_catalog_options(endpoints_list)
+    endpoints_list.add_argument("environment")
+    endpoints_list.add_argument("project")
+
+    dependencies = subparsers.add_parser("dependencies")
+    dependencies.add_argument("--state-db", type=Path, default=config.state_db)
+    dependencies.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
+    dependencies_subparsers = dependencies.add_subparsers(dest="dependencies_command", required=True)
+
+    dependencies_add = dependencies_subparsers.add_parser("add")
+    _add_catalog_options(dependencies_add)
+    dependencies_add.add_argument("environment")
+    dependencies_add.add_argument("project")
+    dependencies_add.add_argument("name")
+    dependencies_add.add_argument("--type", required=True)
+    dependencies_add.add_argument("--target", required=True)
+    dependencies_add.add_argument("--output", action="append")
+
+    dependencies_list = dependencies_subparsers.add_parser("list")
+    _add_catalog_options(dependencies_list)
+    dependencies_list.add_argument("environment")
+    dependencies_list.add_argument("project")
+
     runtime_targets = subparsers.add_parser("runtime-targets")
-    runtime_targets.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
-    runtime_targets.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    runtime_targets.add_argument("--state-db", type=Path, default=config.state_db)
+    runtime_targets.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     runtime_targets_subparsers = runtime_targets.add_subparsers(dest="runtime_targets_command", required=True)
 
     runtime_targets_list = runtime_targets_subparsers.add_parser("list")
@@ -454,8 +764,8 @@ def _parser() -> argparse.ArgumentParser:
     runtime_targets_remove.add_argument("name")
 
     env = subparsers.add_parser("env")
-    env.add_argument("--state-db", type=Path, default=Path(".deployer/state.db"))
-    env.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    env.add_argument("--state-db", type=Path, default=config.state_db)
+    env.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     env_subparsers = env.add_subparsers(dest="env_command", required=True)
 
     env_list = env_subparsers.add_parser("list")
@@ -494,6 +804,13 @@ def _is_service_target(target: str, state: StateStore) -> bool:
 def _add_catalog_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--state-db", type=Path, default=argparse.SUPPRESS)
     parser.add_argument("--runtime-dir", type=Path, default=argparse.SUPPRESS)
+
+
+def _add_deploy_policy_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--deploy-mode", default="manual")
+    parser.add_argument("--deploy-source")
+    parser.add_argument("--deploy-pattern")
+    parser.add_argument("--pattern-type", dest="pattern_type")
 
 
 if __name__ == "__main__":

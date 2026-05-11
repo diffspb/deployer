@@ -286,14 +286,14 @@ deployer environments add prod --url-prefix ""
 deployer projects add dev tasktrack --git-url git@github.com:org/tasktrack.git
 deployer projects add prod tasktrack --git-url git@github.com:org/tasktrack.git
 deployer projects show dev tasktrack
-deployer projects refs dev tasktrack
 
 deployer components add dev tasktrack backend --build-context backend --dockerfile Dockerfile --port 8000
 deployer components add dev tasktrack frontend --build-context frontend --dockerfile Dockerfile --port 3000
-deployer endpoints add dev tasktrack frontend --subdomain tasktrack --auth sso
-deployer endpoints add dev tasktrack backend --subdomain api.tasktrack --auth sso --health-path /api/v1/health
+deployer endpoints add dev tasktrack web frontend --port 3000 --subdomain tasktrack --auth sso
+deployer endpoints add dev tasktrack api backend --port 8000 --subdomain api.tasktrack --auth sso --health-path /api/v1/health
+deployer dependencies add dev tasktrack postgres --type postgres --target postgres-main/tasktrack_dev --output DATABASE_URL=postgresql://...
 
-deployer env set dev tasktrack APP_ENV=dev
+deployer projects env-set dev tasktrack APP_ENV=dev
 deployer deploy dev tasktrack --ref dev
 deployer restart dev tasktrack
 deployer stop dev tasktrack

@@ -48,16 +48,16 @@ deployer projects add dev myapp --git-url <url>
 deployer projects add-local dev myapp --path /path/to/project
 deployer projects list dev
 deployer projects show dev myapp
-deployer projects refs dev myapp
 deployer projects remove dev myapp
 
 deployer components add dev myapp backend --build-context backend --dockerfile Dockerfile --port 8000
-deployer endpoints add dev myapp backend --subdomain myapp --auth sso --health-path /health
+deployer endpoints add dev myapp web backend --port 8000 --subdomain myapp --auth sso --health-path /health
+deployer dependencies add dev myapp postgres --type postgres --target postgres-main/myapp_dev --output DATABASE_URL=postgresql://...
 
-deployer env list dev myapp
-deployer env set dev myapp KEY=value
-deployer env unset dev myapp KEY
-deployer env render dev myapp
+deployer projects env-list dev myapp
+deployer projects env-set dev myapp KEY=value
+deployer projects env-unset dev myapp KEY
+deployer projects env-render dev myapp
 
 deployer deploy dev myapp --ref main
 deployer history dev myapp
