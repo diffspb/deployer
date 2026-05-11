@@ -82,6 +82,7 @@
 
 ## Runtime Targets v2
 
+- [ ] Read and follow `docs/runtime-targets-v2-roadmap.md` as the implementation sequence for this phase.
 - [ ] Replace fixed `prod/dev` environment model with dynamic runtime targets loaded from state.
 - [ ] Add CRUD operations for runtime targets: create, update, delete.
 - [ ] Add per-target `url_prefix` instead of hardcoded `prod/dev` host logic.
