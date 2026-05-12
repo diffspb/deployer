@@ -99,6 +99,19 @@ deployer logs dev myapp --tail 200
 
 `stop` keeps containers stopped. Use `down` when containers should be removed.
 
+Implemented environment-project API:
+
+```text
+GET/POST /api/environments/{environment}/projects
+GET/DELETE /api/environments/{environment}/projects/{project}
+POST /api/environments/{environment}/projects/{project}/components
+POST /api/environments/{environment}/projects/{project}/endpoints
+POST /api/environments/{environment}/projects/{project}/dependencies
+POST /api/environments/{environment}/projects/{project}/deploy
+GET  /api/environments/{environment}/projects/{project}/status
+GET  /api/environments/{environment}/projects/{project}/logs
+```
+
 Web UI:
 
 ```bash

@@ -2,16 +2,15 @@
 
 The API is the contract for the current web UI. The UI must call these endpoints and must not call Docker directly.
 
-This document describes the current intermediate service/runtime-target API. It is superseded as a future
-architecture by the environment-first API in `docs/service-catalog-plan.md`:
+The service/runtime-target API is still present for compatibility, but the target operator API is
+environment-first:
 
 ```text
 Environment -> Project -> Components -> Endpoints / Dependencies
 ```
 
-The next major refactor should replace global `/api/services` and `/api/services/{name}/runtime-targets`
-operations with `/api/environments/{environment}/projects/{project}` operations. No compatibility migration is
-required for the development database.
+New UI work should use `/api/environments/{environment}/projects/{project}` operations. No compatibility
+migration is required for the development database.
 
 ## Configuration
 
@@ -43,6 +42,23 @@ POST   /api/environments
 GET    /api/environments/{environment}/services
 PATCH  /api/environments/{environment}
 DELETE /api/environments/{environment}
+GET    /api/environments/{environment}/projects
+POST   /api/environments/{environment}/projects
+GET    /api/environments/{environment}/projects/{project}
+DELETE /api/environments/{environment}/projects/{project}
+GET    /api/environments/{environment}/projects/{project}/env
+POST   /api/environments/{environment}/projects/{project}/env
+DELETE /api/environments/{environment}/projects/{project}/env/{key}
+POST   /api/environments/{environment}/projects/{project}/components
+POST   /api/environments/{environment}/projects/{project}/endpoints
+POST   /api/environments/{environment}/projects/{project}/dependencies
+GET    /api/environments/{environment}/projects/{project}/preview
+POST   /api/environments/{environment}/projects/{project}/deploy
+POST   /api/environments/{environment}/projects/{project}/stop
+POST   /api/environments/{environment}/projects/{project}/down
+POST   /api/environments/{environment}/projects/{project}/restart
+GET    /api/environments/{environment}/projects/{project}/status
+GET    /api/environments/{environment}/projects/{project}/logs
 GET    /api/services/{name}/refs
 GET    /api/services/{name}/runtime-targets
 POST   /api/services/{name}/runtime-targets

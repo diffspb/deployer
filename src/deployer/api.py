@@ -16,7 +16,19 @@ from deployer.engine import DeploymentEngine
 from deployer.errors import DeployerError
 from deployer.manifest import Manifest, load_manifest
 from deployer.override import render_override, route_host
-from deployer.state import DeploymentRecord, EnvironmentProfileRecord, EnvironmentRecord, JobRecord, ServiceRecord, StateStore
+from deployer.project_spec import project_route_host, render_project_override
+from deployer.state import (
+    DeploymentRecord,
+    EnvironmentProfileRecord,
+    EnvironmentProjectRecord,
+    EnvironmentRecord,
+    JobRecord,
+    ProjectComponentRecord,
+    ProjectDependencyRecord,
+    ProjectEndpointRecord,
+    ServiceRecord,
+    StateStore,
+)
 
 
 class AddServiceRequest(BaseModel):
@@ -63,6 +75,50 @@ class EnvironmentProfileUpdateRequest(BaseModel):
 class EnvSetRequest(BaseModel):
     key: str
     value: str
+
+
+class AddProjectRequest(BaseModel):
+    name: str
+    source_type: str = Field(pattern="^(git|local)$")
+    git_url: str | None = None
+    path: str | None = None
+    default_ref: str | None = None
+    compose_files: list[str] | None = None
+    deploy_mode: str = "manual"
+    deploy_source: str | None = None
+    deploy_pattern: str | None = None
+    deploy_pattern_type: str | None = None
+
+
+class AddComponentRequest(BaseModel):
+    name: str
+    mode: str = Field(default="compose", pattern="^(compose|build|image)$")
+    compose_service: str | None = None
+    build_context: str | None = None
+    dockerfile: str | None = None
+    image: str | None = None
+    command: str | None = None
+    port: int | None = None
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class AddEndpointRequest(BaseModel):
+    name: str
+    component: str
+    port: int
+    host: str | None = None
+    subdomain: str | None = None
+    path_prefix: str | None = None
+    auth: str = Field(default="none", pattern="^(none|sso)$")
+    middlewares: list[str] = Field(default_factory=list)
+    healthcheck_path: str | None = None
+
+
+class AddDependencyRequest(BaseModel):
+    name: str
+    type: str
+    target: str
+    outputs: dict[str, str] = Field(default_factory=dict)
 
 
 def create_app(config: DeployerConfig | None = None) -> FastAPI:
@@ -174,6 +230,209 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         if not removed:
             raise HTTPException(status_code=404, detail=f"Unknown environment profile: {environment}")
         return {"removed": True, "environment": environment}
+
+    @app.get("/api/environments/{environment}/projects")
+    def list_environment_projects(environment: str, catalog: CatalogDep) -> dict:
+        profile = catalog.get_environment_profile(environment)
+        return {
+            "environment": _environment_profile_payload(profile),
+            "projects": [_project_payload(catalog, project) for project in catalog.list_projects(environment)],
+        }
+
+    @app.post("/api/environments/{environment}/projects", status_code=201)
+    def add_environment_project(environment: str, payload: AddProjectRequest, catalog: CatalogDep) -> dict:
+        compose_files = tuple(payload.compose_files or ("docker-compose.yml",))
+        if payload.source_type == "git":
+            if not payload.git_url:
+                raise HTTPException(status_code=422, detail="git_url is required for git projects")
+            project = catalog.add_project_git(
+                environment,
+                payload.name,
+                payload.git_url,
+                default_ref=payload.default_ref,
+                compose_files=compose_files,
+                deploy_mode=payload.deploy_mode,
+                deploy_source=payload.deploy_source,
+                deploy_pattern=payload.deploy_pattern,
+                deploy_pattern_type=payload.deploy_pattern_type,
+            )
+        elif payload.source_type == "local":
+            if not payload.path:
+                raise HTTPException(status_code=422, detail="path is required for local projects")
+            project = catalog.add_project_local(
+                environment,
+                payload.name,
+                Path(payload.path),
+                default_ref=payload.default_ref,
+                compose_files=compose_files,
+                deploy_mode=payload.deploy_mode,
+                deploy_source=payload.deploy_source,
+                deploy_pattern=payload.deploy_pattern,
+                deploy_pattern_type=payload.deploy_pattern_type,
+            )
+        else:
+            raise HTTPException(status_code=422, detail="source_type must be git or local")
+        return _project_detail_payload(catalog, environment, project.name)
+
+    @app.get("/api/environments/{environment}/projects/{project}")
+    def get_environment_project(environment: str, project: str, catalog: CatalogDep) -> dict:
+        return _project_detail_payload(catalog, environment, project)
+
+    @app.delete("/api/environments/{environment}/projects/{project}")
+    def delete_environment_project(
+        environment: str,
+        project: str,
+        catalog: CatalogDep,
+        delete_files: bool = False,
+    ) -> dict:
+        removed = catalog.remove_project(environment, project, delete_files=delete_files)
+        if not removed:
+            raise HTTPException(status_code=404, detail=f"Unknown project: {environment}/{project}")
+        return {"removed": True, "environment": environment, "project": project}
+
+    @app.get("/api/environments/{environment}/projects/{project}/env")
+    def get_project_env(environment: str, project: str, catalog: CatalogDep) -> dict:
+        record = catalog.get_project(environment, project)
+        return {"environment": environment, "project": project, "env": record.env_vars}
+
+    @app.post("/api/environments/{environment}/projects/{project}/env")
+    def set_project_env(environment: str, project: str, payload: EnvSetRequest, catalog: CatalogDep) -> dict:
+        record = catalog.set_project_env(environment, project, payload.key, payload.value)
+        return {"environment": environment, "project": project, "env": record.env_vars}
+
+    @app.delete("/api/environments/{environment}/projects/{project}/env/{key}")
+    def unset_project_env(environment: str, project: str, key: str, catalog: CatalogDep) -> dict:
+        record = catalog.unset_project_env(environment, project, key)
+        return {"environment": environment, "project": project, "env": record.env_vars}
+
+    @app.post("/api/environments/{environment}/projects/{project}/components", status_code=201)
+    def add_project_component(
+        environment: str,
+        project: str,
+        payload: AddComponentRequest,
+        catalog: CatalogDep,
+    ) -> dict:
+        component = catalog.add_component(
+            environment,
+            project,
+            payload.name,
+            mode=payload.mode,
+            compose_service=payload.compose_service,
+            build_context=payload.build_context,
+            dockerfile=payload.dockerfile,
+            image=payload.image,
+            command=payload.command,
+            port=payload.port,
+            env_vars=payload.env,
+        )
+        return {"component": _component_payload(component)}
+
+    @app.post("/api/environments/{environment}/projects/{project}/endpoints", status_code=201)
+    def add_project_endpoint(
+        environment: str,
+        project: str,
+        payload: AddEndpointRequest,
+        catalog: CatalogDep,
+    ) -> dict:
+        endpoint = catalog.add_endpoint(
+            environment,
+            project,
+            payload.name,
+            payload.component,
+            payload.port,
+            host=payload.host,
+            subdomain=payload.subdomain,
+            path_prefix=payload.path_prefix,
+            auth=payload.auth,
+            middlewares=tuple(payload.middlewares),
+            healthcheck_path=payload.healthcheck_path,
+        )
+        return {"endpoint": _endpoint_payload(catalog, environment, project, endpoint)}
+
+    @app.post("/api/environments/{environment}/projects/{project}/dependencies", status_code=201)
+    def add_project_dependency(
+        environment: str,
+        project: str,
+        payload: AddDependencyRequest,
+        catalog: CatalogDep,
+    ) -> dict:
+        dependency = catalog.add_dependency(
+            environment,
+            project,
+            payload.name,
+            payload.type,
+            payload.target,
+            outputs=payload.outputs,
+        )
+        return {"dependency": _dependency_payload(dependency)}
+
+    @app.get("/api/environments/{environment}/projects/{project}/preview")
+    def project_preview(environment: str, project: str, catalog: CatalogDep) -> dict:
+        return _project_preview_payload(catalog, environment, project)
+
+    @app.post("/api/environments/{environment}/projects/{project}/deploy", status_code=202)
+    def deploy_environment_project(
+        environment: str,
+        project: str,
+        payload: DeployRequest,
+        background_tasks: BackgroundTasks,
+        context: ContextDep,
+    ) -> dict:
+        return _schedule_project_runtime_job(
+            context,
+            background_tasks,
+            environment,
+            project,
+            "deploy",
+            dry_run=payload.dry_run,
+            ref=payload.ref,
+            version=payload.version,
+        )
+
+    @app.post("/api/environments/{environment}/projects/{project}/stop", status_code=202)
+    def stop_environment_project(
+        environment: str,
+        project: str,
+        payload: RuntimeRequest,
+        background_tasks: BackgroundTasks,
+        context: ContextDep,
+    ) -> dict:
+        return _schedule_project_runtime_job(context, background_tasks, environment, project, "stop", payload.dry_run)
+
+    @app.post("/api/environments/{environment}/projects/{project}/down", status_code=202)
+    def down_environment_project(
+        environment: str,
+        project: str,
+        payload: RuntimeRequest,
+        background_tasks: BackgroundTasks,
+        context: ContextDep,
+    ) -> dict:
+        return _schedule_project_runtime_job(context, background_tasks, environment, project, "down", payload.dry_run)
+
+    @app.post("/api/environments/{environment}/projects/{project}/restart", status_code=202)
+    def restart_environment_project(
+        environment: str,
+        project: str,
+        payload: RuntimeRequest,
+        background_tasks: BackgroundTasks,
+        context: ContextDep,
+    ) -> dict:
+        return _schedule_project_runtime_job(context, background_tasks, environment, project, "restart", payload.dry_run)
+
+    @app.get("/api/environments/{environment}/projects/{project}/status")
+    def status_environment_project(environment: str, project: str, context: ContextDep) -> dict:
+        result = context.catalog.status_project(environment, project, context.engine)
+        return _command_result_payload(result)
+
+    @app.get("/api/environments/{environment}/projects/{project}/logs")
+    def logs_environment_project(
+        environment: str,
+        project: str,
+        context: ContextDep,
+        tail: int = Query(default=200, ge=1, le=5000),
+    ) -> dict:
+        result = context.catalog.logs_project(environment, project, context.engine, tail=tail)
+        return _command_result_payload(result)
 
     @app.get("/api/services/{name}/refs")
     def refs(name: str, catalog: CatalogDep) -> dict:
@@ -358,6 +617,105 @@ def _environment_profile_payload(profile: EnvironmentProfileRecord, services: li
     return payload
 
 
+def _project_payload(catalog: ServiceCatalog, project: EnvironmentProjectRecord) -> dict:
+    config = catalog.project_config(project.environment, project.name)
+    endpoints = [_endpoint_payload(catalog, project.environment, project.name, endpoint) for endpoint in config.endpoints]
+    return {
+        "id": project.id,
+        "environment": project.environment,
+        "name": project.name,
+        "source_type": project.source_type,
+        "source_url": project.source_url,
+        "source_path": project.source_path,
+        "default_ref": project.default_ref,
+        "compose_files": list(project.compose_files),
+        "deploy_mode": project.deploy_mode,
+        "deploy_source": project.deploy_source,
+        "deploy_pattern": project.deploy_pattern,
+        "deploy_pattern_type": project.deploy_pattern_type,
+        "env": project.env_vars,
+        "current_version": project.current_version,
+        "current_ref": project.current_ref,
+        "current_commit": project.current_commit,
+        "last_deployment_id": project.last_deployment_id,
+        "public_urls": [endpoint["public_url"] for endpoint in endpoints if endpoint["public_url"]],
+        "created_at": project.created_at,
+        "updated_at": project.updated_at,
+    }
+
+
+def _project_detail_payload(catalog: ServiceCatalog, environment: str, project: str) -> dict:
+    config = catalog.project_config(environment, project)
+    return {
+        **_project_payload(catalog, config.project),
+        "components": [_component_payload(component) for component in config.components],
+        "endpoints": [
+            _endpoint_payload(catalog, environment, project, endpoint)
+            for endpoint in config.endpoints
+        ],
+        "dependencies": [_dependency_payload(dependency) for dependency in config.dependencies],
+    }
+
+
+def _component_payload(component: ProjectComponentRecord) -> dict:
+    return {
+        "id": component.id,
+        "name": component.name,
+        "mode": component.mode,
+        "compose_service": component.compose_service,
+        "build_context": component.build_context,
+        "dockerfile": component.dockerfile,
+        "image": component.image,
+        "command": component.command,
+        "port": component.port,
+        "env": component.env_vars,
+        "created_at": component.created_at,
+        "updated_at": component.updated_at,
+    }
+
+
+def _endpoint_payload(
+    catalog: ServiceCatalog,
+    environment: str,
+    project: str,
+    endpoint: ProjectEndpointRecord,
+) -> dict:
+    public_url = None
+    try:
+        spec = catalog.project_spec(environment, project)
+        spec_endpoint = next(item for item in spec.endpoints if item.name == endpoint.name)
+        public_url = f"https://{project_route_host(spec, spec_endpoint)}/"
+    except (DeployerError, StopIteration, ValueError):
+        public_url = None
+    return {
+        "id": endpoint.id,
+        "name": endpoint.name,
+        "component": endpoint.component,
+        "port": endpoint.port,
+        "host": endpoint.host,
+        "subdomain": endpoint.subdomain,
+        "path_prefix": endpoint.path_prefix,
+        "auth": endpoint.auth,
+        "middlewares": list(endpoint.middlewares),
+        "healthcheck_path": endpoint.healthcheck_path,
+        "public_url": public_url,
+        "created_at": endpoint.created_at,
+        "updated_at": endpoint.updated_at,
+    }
+
+
+def _dependency_payload(dependency: ProjectDependencyRecord) -> dict:
+    return {
+        "id": dependency.id,
+        "name": dependency.name,
+        "type": dependency.type,
+        "target": dependency.target,
+        "outputs": dependency.outputs,
+        "created_at": dependency.created_at,
+        "updated_at": dependency.updated_at,
+    }
+
+
 def _services_for_environment(catalog: ServiceCatalog, environment: str) -> list[dict]:
     services = []
     for service in catalog.list_services():
@@ -474,6 +832,48 @@ def _preview_payload(catalog: ServiceCatalog, name: str, environment: str) -> di
         "env_file_content": env_file_content,
         "override_path": str(runtime.override_dir / f"{environment}.override.yml"),
         "override_content": override_content,
+    }
+
+
+def _project_preview_payload(catalog: ServiceCatalog, environment: str, project: str) -> dict:
+    config = catalog.project_config(environment, project)
+    runtime = catalog.resolve_project_runtime(environment, project)
+    env_file = catalog.render_project_env_file(environment, project)
+    env_file_content = env_file.read_text()
+
+    errors: list[dict[str, str]] = []
+    override_content = None
+    public_urls: list[str] = []
+    source_path = Path(config.project.source_path)
+    if not source_path.exists():
+        errors.append({"scope": "source", "message": f"Source path is missing: {source_path}"})
+
+    for compose_file in config.project.compose_files:
+        if not (source_path / compose_file).exists():
+            errors.append({"scope": "compose", "message": f"Missing compose file: {compose_file}"})
+
+    try:
+        spec = catalog.project_spec(environment, project)
+        override_content = render_project_override(spec)
+        public_urls = [
+            f"https://{project_route_host(spec, endpoint)}/"
+            for endpoint in spec.endpoints
+        ]
+    except (DeployerError, ValueError) as exc:
+        errors.append({"scope": "project", "message": str(exc)})
+
+    return {
+        "environment": environment,
+        "project": project,
+        "valid": not errors,
+        "errors": errors,
+        "source_path": str(runtime.source_dir),
+        "compose_files": list(config.project.compose_files),
+        "public_urls": public_urls,
+        "env_file_path": str(runtime.env_file),
+        "env_file_content": env_file_content,
+        "override_path": str(runtime.override_dir / f"{environment}.override.yml"),
+        "override_content": override_content if not errors else None,
     }
 
 
@@ -620,6 +1020,30 @@ def _schedule_runtime_job(
     return _job_payload(job)
 
 
+def _schedule_project_runtime_job(
+    context: ApiContext,
+    background_tasks: BackgroundTasks,
+    environment: str,
+    project: str,
+    action: str,
+    dry_run: bool,
+    ref: str | None = None,
+    version: str | None = None,
+) -> dict:
+    context.catalog.get_project(environment, project)
+    job_id = context.state.create_job(
+        project,
+        environment,
+        action,
+        ref=ref,
+        version=version,
+        dry_run=dry_run,
+    )
+    background_tasks.add_task(_run_runtime_job, context.config, job_id)
+    job = context.state.get_job(job_id)
+    return _job_payload(job)
+
+
 def _run_runtime_job(config: DeployerConfig, job_id: int) -> None:
     context = ApiContext(config)
     job = context.state.get_job(job_id)
@@ -628,7 +1052,9 @@ def _run_runtime_job(config: DeployerConfig, job_id: int) -> None:
 
     context.state.start_job(job_id)
     try:
-        if job.action == "deploy":
+        if context.state.get_project(job.environment, job.service) is not None:
+            result = _run_project_runtime_action(context, job)
+        elif job.action == "deploy":
             result = context.catalog.deploy(
                 job.service,
                 context.engine,
@@ -662,6 +1088,25 @@ def _run_runtime_job(config: DeployerConfig, job_id: int) -> None:
         context.state.finish_job(job_id, "failed", str(exc), error=str(exc))
 
 
+def _run_project_runtime_action(context: ApiContext, job: JobRecord):
+    if job.action == "deploy":
+        return context.catalog.deploy_project(
+            job.environment,
+            job.service,
+            context.engine,
+            ref=job.ref,
+            version=job.version,
+            dry_run=job.dry_run,
+        )
+    if job.action == "stop":
+        return context.catalog.stop_project(job.environment, job.service, context.engine, dry_run=job.dry_run)
+    if job.action == "down":
+        return context.catalog.down_project(job.environment, job.service, context.engine, dry_run=job.dry_run)
+    if job.action == "restart":
+        return context.catalog.restart_project(job.environment, job.service, context.engine, dry_run=job.dry_run)
+    raise RuntimeError(f"Unknown runtime action: {job.action}")
+
+
 def _job_payload(job: JobRecord | None, log_limit: int | None = None) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="Unknown job")
@@ -669,6 +1114,7 @@ def _job_payload(job: JobRecord | None, log_limit: int | None = None) -> dict:
     return {
         "id": job.id,
         "service": job.service,
+        "project": job.service,
         "environment": job.environment,
         "action": job.action,
         "status": job.status,

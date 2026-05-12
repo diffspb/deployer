@@ -187,6 +187,118 @@ def test_api_runtime_target_crud_and_dynamic_deploy(tmp_path: Path):
     assert response.json() == {"removed": True, "service": "myapp", "environment": "stage"}
 
 
+def test_api_environment_project_workflow_without_manifest(tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "docker-compose.yml").write_text(
+        """
+services:
+  app:
+    image: nginx:alpine
+"""
+    )
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/api/environments/dev/projects",
+        json={
+            "name": "tasktrack",
+            "source_type": "local",
+            "path": str(source),
+            "default_ref": "dev",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["environment"] == "dev"
+    assert response.json()["name"] == "tasktrack"
+    assert response.json()["compose_files"] == ["docker-compose.yml"]
+
+    response = client.post(
+        "/api/environments/dev/projects/tasktrack/components",
+        json={
+            "name": "web",
+            "mode": "compose",
+            "compose_service": "app",
+            "port": 8080,
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["component"]["compose_service"] == "app"
+
+    response = client.post(
+        "/api/environments/dev/projects/tasktrack/endpoints",
+        json={
+            "name": "web",
+            "component": "web",
+            "port": 8080,
+            "subdomain": "tasktrack",
+            "auth": "sso",
+            "healthcheck_path": "/health",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["endpoint"]["public_url"] == "https://tasktrack.dev.busypage.ru/"
+
+    response = client.post(
+        "/api/environments/dev/projects/tasktrack/dependencies",
+        json={
+            "name": "postgres",
+            "type": "postgres",
+            "target": "postgres-main/tasktrack_dev",
+            "outputs": {"DATABASE_URL": "postgresql://example/tasktrack_dev"},
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["dependency"]["outputs"]["DATABASE_URL"] == "postgresql://example/tasktrack_dev"
+
+    response = client.post(
+        "/api/environments/dev/projects/tasktrack/env",
+        json={"key": "APP_ENV", "value": "dev"},
+    )
+    assert response.status_code == 200
+    assert response.json()["env"] == {"APP_ENV": "dev"}
+
+    detail = client.get("/api/environments/dev/projects/tasktrack").json()
+    assert detail["components"][0]["name"] == "web"
+    assert detail["endpoints"][0]["public_url"] == "https://tasktrack.dev.busypage.ru/"
+    assert detail["dependencies"][0]["target"] == "postgres-main/tasktrack_dev"
+    assert detail["public_urls"] == ["https://tasktrack.dev.busypage.ru/"]
+
+    projects = client.get("/api/environments/dev/projects").json()
+    assert projects["environment"]["name"] == "dev"
+    assert projects["projects"][0]["name"] == "tasktrack"
+
+    preview = client.get("/api/environments/dev/projects/tasktrack/preview")
+    assert preview.status_code == 200
+    assert preview.json()["valid"] is True
+    assert "Host(`tasktrack.dev.busypage.ru`)" in preview.json()["override_content"]
+    assert preview.json()["env_file_content"] == "APP_ENV=dev\nDATABASE_URL=postgresql://example/tasktrack_dev\n"
+
+    response = client.post(
+        "/api/environments/dev/projects/tasktrack/deploy",
+        json={"ref": "dev", "dry_run": True},
+    )
+    assert response.status_code == 202
+    job = client.get(f"/api/jobs/{response.json()['id']}").json()
+    assert job["status"] == "success"
+    assert job["project"] == "tasktrack"
+    assert job["environment"] == "dev"
+    assert "-p dev-tasktrack" in job["log"]
+    assert "deployer.yml" not in job["log"]
+
+    detail = client.get("/api/environments/dev/projects/tasktrack").json()
+    assert detail["current_ref"] == "dev"
+    assert detail["last_deployment_id"] == job["deployment_id"]
+
+    response = client.delete("/api/environments/dev/projects/tasktrack/env/APP_ENV")
+    assert response.status_code == 200
+    assert response.json()["env"] == {}
+
+    response = client.delete("/api/environments/dev/projects/tasktrack")
+    assert response.status_code == 200
+    assert response.json() == {"removed": True, "environment": "dev", "project": "tasktrack"}
+
+
 def test_api_validation_and_catalog_errors(tmp_path: Path):
     project = _project(tmp_path / "project")
     client = _client(tmp_path)
