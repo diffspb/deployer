@@ -66,7 +66,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "deploy":
             state = StateStore(args.state_db)
             engine = DeploymentEngine(state)
-            if _is_path_target(args.target):
+            if args.project:
+                catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+                result = catalog.deploy_project(
+                    args.target,
+                    args.project,
+                    engine,
+                    ref=args.ref,
+                    version=args.version,
+                    dry_run=args.dry_run,
+                )
+            elif _is_path_target(args.target):
                 result = engine.deploy(
                     Path(args.target),
                     version=args.version,
@@ -89,7 +99,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "stop":
             state = StateStore(args.state_db)
             engine = DeploymentEngine(state)
-            if _is_path_target(args.target):
+            if args.project:
+                catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+                result = catalog.stop_project(args.target, args.project, engine, dry_run=args.dry_run)
+            elif _is_path_target(args.target):
                 result = engine.stop(
                     Path(args.target),
                     dry_run=args.dry_run,
@@ -104,7 +117,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "down":
             state = StateStore(args.state_db)
             engine = DeploymentEngine(state)
-            if _is_path_target(args.target):
+            if args.project:
+                catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+                result = catalog.down_project(args.target, args.project, engine, dry_run=args.dry_run)
+            elif _is_path_target(args.target):
                 result = engine.down(
                     Path(args.target),
                     dry_run=args.dry_run,
@@ -119,7 +135,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "restart":
             state = StateStore(args.state_db)
             engine = DeploymentEngine(state)
-            if _is_path_target(args.target):
+            if args.project:
+                catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+                result = catalog.restart_project(args.target, args.project, engine, dry_run=args.dry_run)
+            elif _is_path_target(args.target):
                 result = engine.restart(
                     Path(args.target),
                     dry_run=args.dry_run,
@@ -134,7 +153,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "status":
             state = StateStore(args.state_db)
             engine = DeploymentEngine(state)
-            if _is_path_target(args.target):
+            if args.project:
+                catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+                result = catalog.status_project(args.target, args.project, engine)
+            elif _is_path_target(args.target):
                 result = engine.status(
                     Path(args.target),
                     manifest_path=args.manifest,
@@ -148,7 +170,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "logs":
             state = StateStore(args.state_db)
             engine = DeploymentEngine(state)
-            if _is_path_target(args.target):
+            if args.project:
+                catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+                result = catalog.logs_project(args.target, args.project, engine, tail=args.tail)
+            elif _is_path_target(args.target):
                 result = engine.logs(
                     Path(args.target),
                     manifest_path=args.manifest,
@@ -242,6 +267,7 @@ def _handle_projects(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
             args.name,
             args.path,
             default_ref=args.default_ref,
+            compose_files=_project_compose_files(args),
             deploy_mode=args.deploy_mode,
             deploy_source=args.deploy_source,
             deploy_pattern=args.deploy_pattern,
@@ -255,6 +281,7 @@ def _handle_projects(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
             args.name,
             args.git_url,
             default_ref=args.default_ref,
+            compose_files=_project_compose_files(args),
             deploy_mode=args.deploy_mode,
             deploy_source=args.deploy_source,
             deploy_pattern=args.deploy_pattern,
@@ -278,6 +305,7 @@ def _handle_projects(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
         print(f"source_url: {project.source_url or '-'}")
         print(f"source_path: {project.source_path}")
         print(f"default_ref: {project.default_ref or '-'}")
+        print(f"compose_files: {', '.join(project.compose_files) or '-'}")
         print(f"deploy_mode: {project.deploy_mode}")
         print(f"deploy_source: {project.deploy_source or '-'}")
         print(f"deploy_pattern: {project.deploy_pattern or '-'}")
@@ -487,6 +515,12 @@ def _parse_assignments(assignments: list[str]) -> dict[str, str]:
     return values
 
 
+def _project_compose_files(args: argparse.Namespace) -> tuple[str, ...]:
+    if args.no_compose_file:
+        return ()
+    return tuple(args.compose_file or ["docker-compose.yml"])
+
+
 def _parser() -> argparse.ArgumentParser:
     config = load_config()
     parser = argparse.ArgumentParser(prog="deployer")
@@ -503,6 +537,7 @@ def _parser() -> argparse.ArgumentParser:
 
     deploy = subparsers.add_parser("deploy")
     deploy.add_argument("target")
+    deploy.add_argument("project", nargs="?")
     deploy.add_argument("--state-db", type=Path, default=config.state_db)
     deploy.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     deploy.add_argument("--manifest", type=Path)
@@ -513,6 +548,7 @@ def _parser() -> argparse.ArgumentParser:
 
     stop = subparsers.add_parser("stop")
     stop.add_argument("target")
+    stop.add_argument("project", nargs="?")
     stop.add_argument("--state-db", type=Path, default=config.state_db)
     stop.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     stop.add_argument("--manifest", type=Path)
@@ -521,6 +557,7 @@ def _parser() -> argparse.ArgumentParser:
 
     down = subparsers.add_parser("down")
     down.add_argument("target")
+    down.add_argument("project", nargs="?")
     down.add_argument("--state-db", type=Path, default=config.state_db)
     down.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     down.add_argument("--manifest", type=Path)
@@ -529,6 +566,7 @@ def _parser() -> argparse.ArgumentParser:
 
     restart = subparsers.add_parser("restart")
     restart.add_argument("target")
+    restart.add_argument("project", nargs="?")
     restart.add_argument("--state-db", type=Path, default=config.state_db)
     restart.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     restart.add_argument("--manifest", type=Path)
@@ -537,6 +575,7 @@ def _parser() -> argparse.ArgumentParser:
 
     status = subparsers.add_parser("status")
     status.add_argument("target")
+    status.add_argument("project", nargs="?")
     status.add_argument("--state-db", type=Path, default=config.state_db)
     status.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     status.add_argument("--manifest", type=Path)
@@ -544,6 +583,7 @@ def _parser() -> argparse.ArgumentParser:
 
     logs = subparsers.add_parser("logs")
     logs.add_argument("target")
+    logs.add_argument("project", nargs="?")
     logs.add_argument("--state-db", type=Path, default=config.state_db)
     logs.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
     logs.add_argument("--manifest", type=Path)
@@ -631,6 +671,8 @@ def _parser() -> argparse.ArgumentParser:
     projects_add.add_argument("name")
     projects_add.add_argument("--git-url", required=True)
     projects_add.add_argument("--default-ref")
+    projects_add.add_argument("--compose-file", action="append")
+    projects_add.add_argument("--no-compose-file", action="store_true")
     _add_deploy_policy_options(projects_add)
 
     projects_add_local = projects_subparsers.add_parser("add-local")
@@ -639,6 +681,8 @@ def _parser() -> argparse.ArgumentParser:
     projects_add_local.add_argument("name")
     projects_add_local.add_argument("--path", type=Path, required=True)
     projects_add_local.add_argument("--default-ref")
+    projects_add_local.add_argument("--compose-file", action="append")
+    projects_add_local.add_argument("--no-compose-file", action="store_true")
     _add_deploy_policy_options(projects_add_local)
 
     projects_list = projects_subparsers.add_parser("list")

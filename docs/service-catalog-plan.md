@@ -283,7 +283,7 @@ deployer environments list
 deployer environments add dev --url-prefix dev
 deployer environments add prod --url-prefix ""
 
-deployer projects add dev tasktrack --git-url git@github.com:org/tasktrack.git
+deployer projects add dev tasktrack --git-url git@github.com:org/tasktrack.git --compose-file docker-compose.yml
 deployer projects add prod tasktrack --git-url git@github.com:org/tasktrack.git
 deployer projects show dev tasktrack
 
@@ -300,6 +300,10 @@ deployer stop dev tasktrack
 deployer logs dev tasktrack --component backend
 deployer status dev tasktrack
 ```
+
+For Dockerfile/image-only projects, use `deployer projects add ... --no-compose-file` and let deployer generate
+the service definitions from components. `deployer.yml` is optional legacy/import input, not a required source
+repository file.
 
 The CLI must not require operators to know Docker container names.
 

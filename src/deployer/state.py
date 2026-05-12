@@ -73,6 +73,7 @@ class EnvironmentProjectRecord:
     source_url: str | None
     source_path: str
     default_ref: str | None
+    compose_files: tuple[str, ...]
     deploy_mode: str
     deploy_source: str | None
     deploy_pattern: str | None
@@ -445,6 +446,7 @@ class StateStore:
         source_path: str,
         source_url: str | None = None,
         default_ref: str | None = None,
+        compose_files: tuple[str, ...] = ("docker-compose.yml",),
         deploy_mode: str = "manual",
         deploy_source: str | None = None,
         deploy_pattern: str | None = None,
@@ -459,10 +461,10 @@ class StateStore:
                 """
                 INSERT INTO environment_projects(
                     environment, name, source_type, source_url, source_path, default_ref,
-                    deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
+                    compose_files_json, deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
                     env_vars_json, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
                 """,
                 (
                     environment,
@@ -471,6 +473,7 @@ class StateStore:
                     source_url,
                     source_path,
                     default_ref,
+                    json.dumps(list(compose_files)),
                     deploy_mode,
                     deploy_source,
                     deploy_pattern,
@@ -491,7 +494,7 @@ class StateStore:
             rows = conn.execute(
                 f"""
                 SELECT id, environment, name, source_type, source_url, source_path, default_ref,
-                       deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
+                       compose_files_json, deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
                        env_vars_json, current_version, current_ref, current_commit,
                        last_deployment_id, created_at, updated_at
                 FROM environment_projects
@@ -507,7 +510,7 @@ class StateStore:
             row = conn.execute(
                 """
                 SELECT id, environment, name, source_type, source_url, source_path, default_ref,
-                       deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
+                       compose_files_json, deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
                        env_vars_json, current_version, current_ref, current_commit,
                        last_deployment_id, created_at, updated_at
                 FROM environment_projects
@@ -1154,6 +1157,7 @@ class StateStore:
                     source_url TEXT,
                     source_path TEXT NOT NULL,
                     default_ref TEXT,
+                    compose_files_json TEXT NOT NULL DEFAULT '["docker-compose.yml"]',
                     deploy_mode TEXT NOT NULL DEFAULT 'manual',
                     deploy_source TEXT,
                     deploy_pattern TEXT,
@@ -1170,6 +1174,12 @@ class StateStore:
                     FOREIGN KEY(last_deployment_id) REFERENCES deployments(id) ON DELETE SET NULL
                 )
                 """
+            )
+            _ensure_column(
+                conn,
+                "environment_projects",
+                "compose_files_json",
+                "TEXT NOT NULL DEFAULT '[\"docker-compose.yml\"]'",
             )
             conn.execute(
                 """
@@ -1291,17 +1301,18 @@ def _environment_project_record(row) -> EnvironmentProjectRecord:
         source_url=row[4],
         source_path=row[5],
         default_ref=row[6],
-        deploy_mode=row[7] or "manual",
-        deploy_source=row[8],
-        deploy_pattern=row[9],
-        deploy_pattern_type=row[10],
-        env_vars=json.loads(row[11] or "{}"),
-        current_version=row[12],
-        current_ref=row[13],
-        current_commit=row[14],
-        last_deployment_id=row[15],
-        created_at=row[16],
-        updated_at=row[17],
+        compose_files=tuple(json.loads(row[7] or '["docker-compose.yml"]')),
+        deploy_mode=row[8] or "manual",
+        deploy_source=row[9],
+        deploy_pattern=row[10],
+        deploy_pattern_type=row[11],
+        env_vars=json.loads(row[12] or "{}"),
+        current_version=row[13],
+        current_ref=row[14],
+        current_commit=row[15],
+        last_deployment_id=row[16],
+        created_at=row[17],
+        updated_at=row[18],
     )
 
 

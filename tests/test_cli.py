@@ -400,6 +400,7 @@ def test_cli_environment_project_workflow(tmp_path: Path, capsys):
                 str(source),
                 "--default-ref",
                 "dev",
+                "--no-compose-file",
                 "--deploy-mode",
                 "webhook_auto",
                 "--deploy-source",
@@ -546,6 +547,27 @@ def test_cli_environment_project_workflow(tmp_path: Path, capsys):
         == 0
     )
     assert "project.env" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "deploy",
+                "dev",
+                "tasktrack",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "Dry run" in output
+    assert "-p dev-tasktrack" in output
+    assert "deployer.yml" not in output
+    assert str(runtime_dir / "environments" / "dev" / "projects" / "tasktrack" / "overrides" / "dev.override.yml") in output
 
 
 def test_cli_uses_config_defaults_for_catalog_commands(tmp_path: Path, capsys, monkeypatch):

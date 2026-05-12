@@ -8,6 +8,7 @@ from deployer.errors import CommandError
 from deployer.health import check_health
 from deployer.manifest import Manifest, load_manifest
 from deployer.override import write_override
+from deployer.project_spec import ProjectSpec, project_compose_command, write_project_override
 from deployer.runner import CommandRunner
 from deployer.state import StateStore
 
@@ -111,6 +112,124 @@ class DeploymentEngine:
                 log = "\n".join(part for part in log_parts if part)
                 self.state.finish_deployment(deployment_id, "failed", log)
                 return DeployResult(deployment_id, manifest.project_name, environment, "failed", log, override_path)
+
+    def deploy_project(
+        self,
+        spec: ProjectSpec,
+        version: str | None = None,
+        dry_run: bool = False,
+        override_dir: Path | None = None,
+        env_file: str | None = None,
+    ) -> DeployResult:
+        deployment_id = self.state.create_deployment(
+            spec.name,
+            spec.environment,
+            "deploy",
+            version,
+        )
+        log_parts: list[str] = []
+        output_dir = override_dir or spec.source_dir / ".deployer"
+        override_path = output_dir / f"{spec.environment}.override.yml"
+
+        lock = _project_lock(spec.deployment_key)
+        with lock:
+            try:
+                override_path = write_project_override(spec, output_dir)
+                log_parts.append(f"Generated override: {override_path}")
+                command = project_compose_command(spec, override_path, env_file=env_file)
+                log_parts.append(f"Command: {' '.join(command)}")
+                if dry_run:
+                    log_parts.append("Dry run: docker compose was not executed")
+                else:
+                    result = self.runner.run(command, cwd=spec.source_dir, env=COMPOSE_BUILD_ENV)
+                    log_parts.append(result.output)
+                log = "\n".join(part for part in log_parts if part)
+                self.state.finish_deployment(deployment_id, "success", log)
+                return DeployResult(deployment_id, spec.name, spec.environment, "success", log, override_path)
+            except (CommandError, RuntimeError, ValueError) as exc:
+                if isinstance(exc, CommandError):
+                    log_parts.append(exc.output)
+                else:
+                    log_parts.append(str(exc))
+                log = "\n".join(part for part in log_parts if part)
+                self.state.finish_deployment(deployment_id, "failed", log)
+                return DeployResult(deployment_id, spec.name, spec.environment, "failed", log, override_path)
+
+    def stop_project(
+        self,
+        spec: ProjectSpec,
+        dry_run: bool = False,
+        override_dir: Path | None = None,
+        env_file: str | None = None,
+    ) -> DeployResult:
+        return self._project_deployment_action(
+            "stop",
+            spec,
+            dry_run=dry_run,
+            override_dir=override_dir,
+            env_file=env_file,
+        )
+
+    def down_project(
+        self,
+        spec: ProjectSpec,
+        dry_run: bool = False,
+        override_dir: Path | None = None,
+        env_file: str | None = None,
+    ) -> DeployResult:
+        return self._project_deployment_action(
+            "down",
+            spec,
+            dry_run=dry_run,
+            override_dir=override_dir,
+            env_file=env_file,
+        )
+
+    def restart_project(
+        self,
+        spec: ProjectSpec,
+        dry_run: bool = False,
+        override_dir: Path | None = None,
+        env_file: str | None = None,
+    ) -> DeployResult:
+        return self._project_deployment_action(
+            "restart",
+            spec,
+            dry_run=dry_run,
+            override_dir=override_dir,
+            env_file=env_file,
+        )
+
+    def status_project(
+        self,
+        spec: ProjectSpec,
+        override_dir: Path | None = None,
+        env_file: str | None = None,
+    ) -> CommandResult:
+        output_dir = override_dir or spec.source_dir / ".deployer"
+        override_path = write_project_override(spec, output_dir)
+        command = project_compose_command(spec, override_path, action="ps", env_file=env_file)
+        try:
+            result = self.runner.run(command, cwd=spec.source_dir, env=COMPOSE_BUILD_ENV)
+            return CommandResult(spec.name, spec.environment, "success", result.output, override_path)
+        except CommandError as exc:
+            return CommandResult(spec.name, spec.environment, "failed", exc.output, override_path)
+
+    def logs_project(
+        self,
+        spec: ProjectSpec,
+        override_dir: Path | None = None,
+        env_file: str | None = None,
+        tail: int = 200,
+    ) -> CommandResult:
+        output_dir = override_dir or spec.source_dir / ".deployer"
+        override_path = write_project_override(spec, output_dir)
+        command = project_compose_command(spec, override_path, action="logs", tail=tail, env_file=env_file)
+        try:
+            result = self.runner.run(command, cwd=spec.source_dir, env=COMPOSE_BUILD_ENV)
+            return CommandResult(spec.name, spec.environment, "success", result.output, override_path)
+        except CommandError as exc:
+            return CommandResult(spec.name, spec.environment, "failed", exc.output, override_path)
 
     def stop(
         self,
@@ -336,6 +455,43 @@ class DeploymentEngine:
                 log = "\n".join(part for part in log_parts if part)
                 self.state.finish_deployment(deployment_id, "failed", log)
                 return DeployResult(deployment_id, manifest.project_name, environment, "failed", log, override_path)
+
+    def _project_deployment_action(
+        self,
+        action: str,
+        spec: ProjectSpec,
+        dry_run: bool = False,
+        override_dir: Path | None = None,
+        env_file: str | None = None,
+    ) -> DeployResult:
+        deployment_id = self.state.create_deployment(spec.name, spec.environment, action, None)
+        log_parts: list[str] = []
+        output_dir = override_dir or spec.source_dir / ".deployer"
+        override_path = output_dir / f"{spec.environment}.override.yml"
+
+        lock = _project_lock(spec.deployment_key)
+        with lock:
+            try:
+                override_path = write_project_override(spec, output_dir)
+                log_parts.append(f"Generated override: {override_path}")
+                command = project_compose_command(spec, override_path, action=action, env_file=env_file)
+                log_parts.append(f"Command: {' '.join(command)}")
+                if dry_run:
+                    log_parts.append("Dry run: docker compose was not executed")
+                else:
+                    result = self.runner.run(command, cwd=spec.source_dir, env=COMPOSE_BUILD_ENV)
+                    log_parts.append(result.output)
+                log = "\n".join(part for part in log_parts if part)
+                self.state.finish_deployment(deployment_id, "success", log)
+                return DeployResult(deployment_id, spec.name, spec.environment, "success", log, override_path)
+            except (CommandError, ValueError) as exc:
+                if isinstance(exc, CommandError):
+                    log_parts.append(exc.output)
+                else:
+                    log_parts.append(str(exc))
+                log = "\n".join(part for part in log_parts if part)
+                self.state.finish_deployment(deployment_id, "failed", log)
+                return DeployResult(deployment_id, spec.name, spec.environment, "failed", log, override_path)
 
     def _check_health(
         self,

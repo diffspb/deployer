@@ -221,7 +221,9 @@ Work:
 
 Acceptance:
 
-- project can be deployed without `deployer.yml`;
+- project can be deployed without `deployer.yml` using `deployer deploy <environment> <project>`;
+- existing compose repositories use compose overlay mode from deployer-managed endpoint/component settings;
+- Dockerfile/image-only projects can use generated service definitions with `--no-compose-file`;
 - one project can expose frontend and backend endpoints;
 - generated files remain under deployer-managed runtime directory.
 

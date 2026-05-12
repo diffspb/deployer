@@ -9,6 +9,7 @@ from pathlib import Path
 from deployer.engine import CommandResult, DeployResult, DeploymentEngine
 from deployer.errors import CommandError, DeployerError
 from deployer.manifest import load_manifest
+from deployer.project_spec import build_project_spec
 from deployer.runner import CommandRunner
 from deployer.state import (
     DeploymentRecord,
@@ -38,6 +39,17 @@ class ServiceRuntime:
     service: ServiceRecord
     environment: EnvironmentRecord
     project_dir: Path
+    override_dir: Path
+    env_file: Path
+    ref: str | None
+    commit_hash: str | None
+    prepare_log: str
+
+
+@dataclass(frozen=True)
+class EnvironmentProjectRuntime:
+    project: EnvironmentProjectRecord
+    source_dir: Path
     override_dir: Path
     env_file: Path
     ref: str | None
@@ -105,6 +117,7 @@ class ServiceCatalog:
         name: str,
         path: Path,
         default_ref: str | None = None,
+        compose_files: tuple[str, ...] = ("docker-compose.yml",),
         deploy_mode: str = "manual",
         deploy_source: str | None = None,
         deploy_pattern: str | None = None,
@@ -112,6 +125,7 @@ class ServiceCatalog:
     ) -> EnvironmentProjectRecord:
         _validate_target_name(environment)
         _validate_service_name(name)
+        _validate_compose_files(compose_files)
         _validate_deploy_policy(deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type)
         source_path = path.resolve()
         if not source_path.exists():
@@ -123,6 +137,7 @@ class ServiceCatalog:
                 "local",
                 str(source_path),
                 default_ref=default_ref,
+                compose_files=compose_files,
                 deploy_mode=deploy_mode,
                 deploy_source=deploy_source,
                 deploy_pattern=deploy_pattern,
@@ -141,6 +156,7 @@ class ServiceCatalog:
         name: str,
         git_url: str,
         default_ref: str | None = None,
+        compose_files: tuple[str, ...] = ("docker-compose.yml",),
         deploy_mode: str = "manual",
         deploy_source: str | None = None,
         deploy_pattern: str | None = None,
@@ -148,6 +164,7 @@ class ServiceCatalog:
     ) -> EnvironmentProjectRecord:
         _validate_target_name(environment)
         _validate_service_name(name)
+        _validate_compose_files(compose_files)
         _validate_deploy_policy(deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type)
         project_dir = self.project_dir(environment, name)
         repo_dir = project_dir / "repo"
@@ -165,6 +182,7 @@ class ServiceCatalog:
                 str(repo_dir),
                 source_url=git_url,
                 default_ref=default_ref,
+                compose_files=compose_files,
                 deploy_mode=deploy_mode,
                 deploy_source=deploy_source,
                 deploy_pattern=deploy_pattern,
@@ -340,11 +358,177 @@ class ServiceCatalog:
             raise CatalogError(f"Unknown project: {environment}/{project}") from exc
 
     def render_project_env_file(self, environment: str, project: str) -> Path:
-        record = self.get_project(environment, project)
+        config = self.project_config(environment, project)
         env_file = self.project_dir(environment, project) / "env" / "project.env"
         env_file.parent.mkdir(parents=True, exist_ok=True)
-        env_file.write_text(render_env(record.env_vars))
+        env_vars = _project_runtime_env(config)
+        env_file.write_text(render_env(env_vars))
         return env_file
+
+    def deploy_project(
+        self,
+        environment: str,
+        project_name: str,
+        engine: DeploymentEngine,
+        ref: str | None = None,
+        version: str | None = None,
+        dry_run: bool = False,
+    ) -> DeployResult:
+        runtime = self.prepare_project_runtime(environment, project_name, ref)
+        self.state.update_project_source_state(
+            environment,
+            project_name,
+            version or runtime.ref,
+            runtime.ref,
+            runtime.commit_hash,
+        )
+        spec = self.project_spec(environment, project_name)
+        result = engine.deploy_project(
+            spec,
+            version=version or runtime.ref,
+            dry_run=dry_run,
+            override_dir=runtime.override_dir,
+            env_file=str(runtime.env_file),
+        )
+        merged_log = _merge_logs(runtime.prepare_log, result.log)
+        result = DeployResult(
+            result.deployment_id,
+            result.project,
+            result.environment,
+            result.status,
+            merged_log,
+            result.override_path,
+        )
+        if result.status == "success":
+            self.state.update_project_version(
+                environment,
+                project_name,
+                result.deployment_id,
+                version or runtime.ref,
+                runtime.ref,
+                runtime.commit_hash,
+            )
+        return result
+
+    def stop_project(
+        self,
+        environment: str,
+        project_name: str,
+        engine: DeploymentEngine,
+        dry_run: bool = False,
+    ) -> DeployResult:
+        runtime = self.resolve_project_runtime(environment, project_name)
+        self.render_project_env_file(environment, project_name)
+        spec = self.project_spec(environment, project_name)
+        return engine.stop_project(spec, dry_run=dry_run, override_dir=runtime.override_dir, env_file=str(runtime.env_file))
+
+    def down_project(
+        self,
+        environment: str,
+        project_name: str,
+        engine: DeploymentEngine,
+        dry_run: bool = False,
+    ) -> DeployResult:
+        runtime = self.resolve_project_runtime(environment, project_name)
+        self.render_project_env_file(environment, project_name)
+        spec = self.project_spec(environment, project_name)
+        return engine.down_project(spec, dry_run=dry_run, override_dir=runtime.override_dir, env_file=str(runtime.env_file))
+
+    def restart_project(
+        self,
+        environment: str,
+        project_name: str,
+        engine: DeploymentEngine,
+        dry_run: bool = False,
+    ) -> DeployResult:
+        runtime = self.resolve_project_runtime(environment, project_name)
+        self.render_project_env_file(environment, project_name)
+        spec = self.project_spec(environment, project_name)
+        return engine.restart_project(spec, dry_run=dry_run, override_dir=runtime.override_dir, env_file=str(runtime.env_file))
+
+    def status_project(
+        self,
+        environment: str,
+        project_name: str,
+        engine: DeploymentEngine,
+    ) -> CommandResult:
+        runtime = self.resolve_project_runtime(environment, project_name)
+        self.render_project_env_file(environment, project_name)
+        spec = self.project_spec(environment, project_name)
+        return engine.status_project(spec, override_dir=runtime.override_dir, env_file=str(runtime.env_file))
+
+    def logs_project(
+        self,
+        environment: str,
+        project_name: str,
+        engine: DeploymentEngine,
+        tail: int = 200,
+    ) -> CommandResult:
+        runtime = self.resolve_project_runtime(environment, project_name)
+        self.render_project_env_file(environment, project_name)
+        spec = self.project_spec(environment, project_name)
+        return engine.logs_project(spec, override_dir=runtime.override_dir, env_file=str(runtime.env_file), tail=tail)
+
+    def project_spec(self, environment: str, project_name: str):
+        config = self.project_config(environment, project_name)
+        profile = self.get_environment_profile(environment)
+        return build_project_spec(
+            config.project,
+            profile,
+            config.components,
+            config.endpoints,
+            config.dependencies,
+            env_file=str(self.project_dir(environment, project_name) / "env" / "project.env"),
+        )
+
+    def prepare_project_runtime(
+        self,
+        environment: str,
+        project_name: str,
+        ref: str | None = None,
+    ) -> EnvironmentProjectRuntime:
+        project = self.get_project(environment, project_name)
+        source_dir = Path(project.source_path)
+        commit_hash = None
+        actual_ref = ref or project.default_ref
+        prepare_log: list[str] = []
+        if project.source_type == "git":
+            prepare_log.append("git fetch --all --tags")
+            self.runner.run(["git", "fetch", "--all", "--tags"], cwd=source_dir)
+            if actual_ref:
+                prepare_log.append(f"git checkout {actual_ref}")
+                self._checkout_ref(source_dir, actual_ref)
+            commit_hash = self.runner.run(["git", "rev-parse", "HEAD"], cwd=source_dir).output.strip()
+            current_ref = self.runner.run(["git", "branch", "--show-current"], cwd=source_dir).output.strip()
+            prepare_log.append(f"git branch --show-current -> {current_ref or '(detached)'}")
+            prepare_log.append(f"git rev-parse HEAD -> {commit_hash}")
+        elif _is_git_repo(source_dir):
+            commit_hash = self.runner.run(["git", "rev-parse", "HEAD"], cwd=source_dir).output.strip()
+            prepare_log.append(f"git rev-parse HEAD -> {commit_hash}")
+        env_file = self.render_project_env_file(environment, project_name)
+        project_dir = self.project_dir(environment, project_name)
+        return EnvironmentProjectRuntime(
+            project=project,
+            source_dir=source_dir,
+            override_dir=project_dir / "overrides",
+            env_file=env_file,
+            ref=actual_ref,
+            commit_hash=commit_hash,
+            prepare_log="\n".join(prepare_log),
+        )
+
+    def resolve_project_runtime(self, environment: str, project_name: str) -> EnvironmentProjectRuntime:
+        project = self.get_project(environment, project_name)
+        project_dir = self.project_dir(environment, project_name)
+        return EnvironmentProjectRuntime(
+            project=project,
+            source_dir=Path(project.source_path),
+            override_dir=project_dir / "overrides",
+            env_file=project_dir / "env" / "project.env",
+            ref=None,
+            commit_hash=None,
+            prepare_log="",
+        )
 
     def add_git(self, name: str, git_url: str, default_branch: str | None = None) -> ServiceRecord:
         _validate_service_name(name)
@@ -774,6 +958,13 @@ def render_env(env_vars: dict[str, str]) -> str:
     return "".join(f"{key}={_env_value(value)}\n" for key, value in sorted(env_vars.items()))
 
 
+def _project_runtime_env(config: EnvironmentProjectConfig) -> dict[str, str]:
+    env_vars = dict(config.project.env_vars)
+    for dependency in config.dependencies:
+        env_vars.update(dependency.outputs)
+    return env_vars
+
+
 def _merge_logs(*parts: str) -> str:
     return "\n".join(part for part in parts if part)
 
@@ -803,6 +994,14 @@ def _validate_project_scope(environment: str, project: str) -> None:
 def _validate_component_name(name: str) -> None:
     if not _TARGET_NAME_RE.fullmatch(name):
         raise CatalogError("Component name must contain lowercase letters, digits, and dashes")
+
+
+def _validate_compose_files(compose_files: tuple[str, ...]) -> None:
+    if not compose_files:
+        return
+    for file in compose_files:
+        if not file or file.startswith("/") or ".." in Path(file).parts:
+            raise CatalogError("Compose files must be relative paths inside the source checkout")
 
 
 def _validate_component(

@@ -181,7 +181,50 @@ def test_catalog_adds_environment_project_without_manifest(tmp_path: Path):
     assert config.endpoints[0].subdomain == "api.tasktrack"
     assert config.dependencies[0].target == "postgres-main/tasktrack_dev"
     assert env_path == tmp_path / "runtime" / "environments" / "dev" / "projects" / "tasktrack" / "env" / "project.env"
-    assert env_path.read_text() == "APP_ENV=dev\n"
+    assert env_path.read_text() == "APP_ENV=dev\nDATABASE_URL=postgresql://tasktrack_dev@example/tasktrack_dev\n"
+
+
+def test_catalog_deploys_environment_project_without_manifest(tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "docker-compose.yml").write_text(
+        """
+services:
+  app:
+    image: nginx:alpine
+"""
+    )
+    state = StateStore(tmp_path / "state.db")
+    catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
+    catalog.add_project_local("dev", "tasktrack", source, default_ref="dev")
+    catalog.add_component("dev", "tasktrack", "web", mode="compose", compose_service="app", port=8080)
+    catalog.add_endpoint("dev", "tasktrack", "web", "web", 8080, subdomain="tasktrack", auth="sso")
+    catalog.add_dependency(
+        "dev",
+        "tasktrack",
+        "postgres",
+        "postgres",
+        "postgres-main/tasktrack_dev",
+        outputs={"DATABASE_URL": "postgresql://example/tasktrack_dev"},
+    )
+    catalog.set_project_env("dev", "tasktrack", "APP_ENV", "dev")
+
+    result = catalog.deploy_project("dev", "tasktrack", DeploymentEngine(state), dry_run=True)
+
+    override_path = tmp_path / "runtime" / "environments" / "dev" / "projects" / "tasktrack" / "overrides" / "dev.override.yml"
+    env_path = tmp_path / "runtime" / "environments" / "dev" / "projects" / "tasktrack" / "env" / "project.env"
+    override = override_path.read_text()
+    assert result.status == "success"
+    assert result.override_path == override_path
+    assert "-p dev-tasktrack" in result.log
+    assert "deployer.yml" not in result.log
+    assert "Host(`tasktrack.dev.busypage.ru`)" in override
+    assert "sso-errors@file,sso-auth@file" in override
+    assert f"env_file: {env_path}" in override
+    assert "APP_ENV=dev\nDATABASE_URL=postgresql://example/tasktrack_dev\n" == env_path.read_text()
+    project = state.require_project("dev", "tasktrack")
+    assert project.current_ref == "dev"
+    assert project.last_deployment_id == result.deployment_id
 
 
 def test_catalog_allows_same_project_name_in_different_environments(tmp_path: Path):

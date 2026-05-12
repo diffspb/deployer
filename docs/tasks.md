@@ -69,11 +69,12 @@
 - [x] Add environment project catalog operations alongside the old service catalog.
 - [x] Add CLI commands for environment-scoped projects, components, endpoints, dependencies, and project env.
 - [ ] Replace service catalog layer with environment project catalog operations in CLI/API/UI.
-- [ ] Refactor engine to deploy a resolved project spec instead of requiring repository-local `deployer.yml`.
-- [ ] Support compose overlay mode for existing compose files.
-- [ ] Support generated compose mode from component definitions.
-- [ ] Generate Traefik labels for multiple public endpoints.
-- [ ] Replace old runtime CLI commands with `environment + project` commands.
+- [x] Refactor engine to deploy a resolved project spec instead of requiring repository-local `deployer.yml`.
+- [x] Support compose overlay mode for existing compose files.
+- [x] Support generated compose mode from component definitions.
+- [x] Generate Traefik labels for multiple public endpoints.
+- [x] Add `environment + project` runtime command form.
+- [ ] Replace old runtime CLI commands with `environment + project` commands everywhere.
 - [ ] Remove `runtime-targets` CLI commands.
 - [x] Fix CLI defaults so packaged service commands do not require `--state-db` or `--runtime-dir`.
 - [ ] Replace API routes with `/api/environments/{environment}/projects/{project}` routes.

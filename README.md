@@ -81,11 +81,15 @@ deployer projects env-set dev myapp KEY=value
 deployer projects show dev myapp
 ```
 
-Target runtime commands after the engine refactor:
+`deployer.yml` is not required for environment projects. Runtime configuration is stored in deployer state:
+source, compose files, components, endpoints, dependency outputs, and env variables. Existing compose-based
+repositories use `--compose-file` or the default `docker-compose.yml`; Dockerfile/image-only projects can use
+`--no-compose-file` and generated component definitions.
+
+Implemented environment-project runtime commands:
 
 ```bash
 deployer deploy dev myapp --ref dev
-deployer history dev myapp
 deployer status dev myapp
 deployer stop dev myapp
 deployer down dev myapp
