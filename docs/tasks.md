@@ -80,8 +80,8 @@
 - [x] Fix CLI defaults so packaged service commands do not require `--state-db` or `--runtime-dir`.
 - [x] Add `/api/environments/{environment}/projects/{project}` routes.
 - [ ] Remove old service/runtime-target API routes after UI migration.
-- [ ] Rebuild UI around environment pages and environment project pages.
-- [ ] Remove attach/detach flows from UI and API.
+- [x] Rebuild UI around environment pages and environment project pages.
+- [ ] Remove attach/detach flows from API after compatibility window.
 - [x] Add GitHub webhook ingestion for environment project deploy policies.
 - [x] Implement `webhook_auto` for one configured environment project.
 - [x] Implement `webhook_gated` candidate storage and deploy.
@@ -131,8 +131,8 @@
 - [x] Implement webhook rule matching for tag-based deployments.
 - [x] Implement `webhook_auto` mode: matching event deploys immediately.
 - [x] Implement `webhook_gated` mode: matching event updates candidate without deploying.
-- [ ] Add UI for target deploy mode and trigger configuration.
-- [ ] Add UI for candidate inspection and `Deploy Candidate`.
+- [x] Add UI for project deploy mode and trigger configuration.
+- [x] Add UI for candidate inspection and `Deploy Candidate`.
 - [ ] Add sample target setup as an example, not as a fixed environment set:
   - `dev` auto by branch push
   - `stage` auto by tag regex

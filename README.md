@@ -124,9 +124,9 @@ Web UI:
 make api
 ```
 
-Open `http://127.0.0.1:8000/`. The UI uses the same API contract as external clients. It is organized
-environment-first in the target architecture: open an environment, add projects to it, configure components,
-endpoints, dependencies, env variables, deploy policy, jobs, and logs in that environment context.
+Open `http://127.0.0.1:8000/`. The UI uses the environment-project API: open an environment, add projects to
+it, configure components, endpoints, dependencies, env variables, deploy policy, jobs, logs, webhook events,
+and gated deploy candidates in that environment context.
 
 ## Server Runbook
 

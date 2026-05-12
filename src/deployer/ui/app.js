@@ -1,49 +1,26 @@
-function loadStoredJson(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? { ...fallback, ...JSON.parse(raw) } : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 const state = {
-  services: [],
   environments: [],
+  projects: [],
   jobs: [],
-  currentView: { name: "environments" },
+  webhookEvents: [],
+  currentView: { name: "dashboard" },
   theme: localStorage.getItem("deployer-theme") || "light",
   toast: "",
-  addOpen: false,
-  addSourceType: "git",
+  loadError: "",
+  addProject: null,
   deployModal: null,
   logsDrawer: null,
-  historyDrawer: null,
   jobDrawer: null,
-  actionMenu: null,
-  expandedServices: {},
-  servicesFilter: loadStoredJson("deployer-services-filter", {
-    query: "",
-    environment: "",
-    status: "",
-  }),
-  jobsFilter: loadStoredJson("deployer-jobs-filter", {
-    query: "",
-    service: "",
-    environment: "",
-    status: "",
-  }),
-  runtimePreview: {},
   runtimeStatus: {},
-  loadError: "",
+  filters: {
+    query: "",
+    environment: "",
+    status: "",
+  },
 };
 
 const root = document.getElementById("deployer-root");
 document.documentElement.dataset.theme = state.theme;
-const ACTION_MENU_WIDTH = 180;
-const ACTION_MENU_HEIGHT = 240;
-const ACTION_MENU_GAP = 6;
-const ACTION_MENU_VIEWPORT_PADDING = 8;
 
 const icons = {
   plus: "M12 4v16m-8-8h16",
@@ -55,13 +32,10 @@ const icons = {
   close: "M18 6L6 18M6 6l12 12",
   moon: "M20 15.4A8.5 8.5 0 018.6 4 8.5 8.5 0 1020 15.4z",
   sun: "M12 3v2m0 14v2m9-9h-2M5 12H3m15.4-6.4L17 7M7 17l-1.4 1.4M18.4 18.4L17 17M7 7L5.6 5.6M12 8a4 4 0 100 8 4 4 0 000-8z",
-  gear: "M10.3 4.3c.4-1.7 2.9-1.7 3.4 0a1.7 1.7 0 002.5 1c1.5-.9 3.3.9 2.4 2.4a1.7 1.7 0 001 2.5c1.7.4 1.7 2.9 0 3.4a1.7 1.7 0 00-1 2.5c.9 1.5-.9 3.3-2.4 2.4a1.7 1.7 0 00-2.5 1c-.5 1.7-3 1.7-3.4 0a1.7 1.7 0 00-2.5-1c-1.5.9-3.3-.9-2.4-2.4a1.7 1.7 0 00-1-2.5c-1.7-.5-1.7-3 0-3.4a1.7 1.7 0 001-2.5c-.9-1.5.9-3.3 2.4-2.4a1.7 1.7 0 002.5-1zM12 9a3 3 0 100 6 3 3 0 000-6z",
   list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
   history: "M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8m9-4v8l4 2",
-  chevronDown: "M6 9l6 6 6-6",
-  chevronRight: "M9 6l6 6-6 6",
   external: "M14 5h5v5M10 14L19 5M19 14v5H5V5h5",
-  more: "M12 5h.01M12 12h.01M12 19h.01",
+  gear: "M10.3 4.3c.4-1.7 2.9-1.7 3.4 0a1.7 1.7 0 002.5 1c1.5-.9 3.3.9 2.4 2.4a1.7 1.7 0 001 2.5c1.7.4 1.7 2.9 0 3.4a1.7 1.7 0 00-1 2.5c.9 1.5-.9 3.3-2.4 2.4a1.7 1.7 0 00-2.5 1c-.5 1.7-3 1.7-3.4 0a1.7 1.7 0 00-2.5-1c-1.5.9-3.3-.9-2.4-2.4a1.7 1.7 0 00-1-2.5c-1.7-.5-1.7-3 0-3.4a1.7 1.7 0 001-2.5c-.9-1.5.9-3.3 2.4-2.4a1.7 1.7 0 002.5-1zM12 9a3 3 0 100 6 3 3 0 000-6z",
 };
 
 function icon(name, size = 15) {
@@ -76,6 +50,10 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function js(value) {
+  return escapeHtml(JSON.stringify(value));
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
@@ -83,17 +61,15 @@ async function api(path, options = {}) {
   });
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
-  if (!response.ok) {
-    throw new Error(data?.detail || `HTTP ${response.status}`);
-  }
+  if (!response.ok) throw new Error(data?.detail || `HTTP ${response.status}`);
   return data;
 }
 
-function runtimeKey(service, environment) {
-  return `${service}/${environment}`;
+function projectKey(environment, project) {
+  return `${environment}/${project}`;
 }
 
-function serviceColor(name) {
+function projectColor(name) {
   const colors = [
     "oklch(0.50 0.15 220)",
     "oklch(0.48 0.13 160)",
@@ -105,12 +81,8 @@ function serviceColor(name) {
   return colors[sum % colors.length];
 }
 
-function serviceInitials(name) {
-  return name
-    .split("-")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 3);
+function initials(name) {
+  return name.split("-").map((part) => part[0]).join("").slice(0, 3);
 }
 
 function shortCommit(value) {
@@ -118,323 +90,137 @@ function shortCommit(value) {
 }
 
 function formatTime(value) {
-  if (!value) return "-";
-  return new Date(value).toLocaleString();
+  return value ? new Date(value).toLocaleString() : "-";
 }
 
-function formatSource(service) {
-  return service.source_url || service.source_path || "-";
+function deployPolicyLabel(project) {
+  if (!project?.deploy_mode || project.deploy_mode === "manual") return "manual";
+  return `${project.deploy_mode} · ${project.deploy_source || "-"} · ${project.deploy_pattern_type || "-"} · ${project.deploy_pattern || "-"}`;
 }
 
-function matchesQuery(parts, query) {
-  if (!query) return true;
-  const lowered = query.toLowerCase();
-  return parts.some((part) => String(part ?? "").toLowerCase().includes(lowered));
+function projectByName(environment, name) {
+  return state.projects.find((project) => project.environment === environment && project.name === name) || null;
 }
 
-function environmentLabel(name) {
-  return name;
+function projectsForEnvironment(environment) {
+  return state.projects.filter((project) => project.environment === environment);
 }
 
-function envSummary(service, environment) {
-  return service.environments?.find((item) => item.name === environment) || {};
+function latestJob(environment, project) {
+  return state.jobs.find((job) => job.environment === environment && job.project === project);
 }
 
-function deployPolicyLabel(env) {
-  if (!env?.deploy_mode || env.deploy_mode === "manual") return "manual";
-  const source = env.deploy_source || "-";
-  const pattern = env.deploy_pattern || "-";
-  const patternType = env.deploy_pattern_type || "-";
-  return `${env.deploy_mode} · ${source} · ${patternType} · ${pattern}`;
+function activeJob(environment, project) {
+  return state.jobs.find((job) => job.environment === environment && job.project === project && ["queued", "running"].includes(job.status));
 }
 
-function serviceEnvironmentNames(service) {
-  return (service.environments || []).map((environment) => environment.name);
-}
-
-function servicesForEnvironment(environment) {
-  return state.services.filter((service) => serviceEnvironmentNames(service).includes(environment));
-}
-
-function unassignedServices() {
-  return state.services.filter((service) => serviceEnvironmentNames(service).length === 0);
-}
-
-function allEnvironmentNames() {
-  return [...new Set([
-    ...state.environments.map((environment) => environment.name),
-    ...state.jobs.map((job) => job.environment).filter(Boolean),
-  ])].sort((a, b) => a.localeCompare(b));
-}
-
-function environmentByName(name) {
-  return state.environments.find((environment) => environment.name === name) || null;
-}
-
-function serviceByName(name) {
-  return state.services.find((service) => service.name === name) || null;
-}
-
-function runtimeByName(serviceName, environment) {
-  const service = serviceByName(serviceName);
-  if (!service) return null;
-  const summary = envSummary(service, environment);
-  if (!summary.name) return null;
-  return { service, environment: summary };
-}
-
-function runtimeUrl(serviceName, environment) {
-  const runtime = runtimeByName(serviceName, environment);
-  return runtime?.environment.public_url || null;
-}
-
-function latestRuntimeJob(serviceName, environment) {
-  return state.jobs.find((job) => job.service === serviceName && job.environment === environment);
-}
-
-function latestVisibleFailure(serviceName, environment) {
-  const job = state.jobs.find(
-    (item) =>
-      item.service === serviceName &&
-      item.environment === environment &&
-      ["success", "failed"].includes(item.status),
-  );
-  return job?.status === "failed" ? job : null;
-}
-
-function activeJobForRuntime(serviceName, environment) {
-  return state.jobs.find(
-    (job) =>
-      job.service === serviceName &&
-      job.environment === environment &&
-      ["queued", "running"].includes(job.status),
-  );
-}
-
-function upsertJob(job) {
-  const index = state.jobs.findIndex((item) => item.id === job.id);
-  if (index >= 0) {
-    state.jobs[index] = job;
-  } else {
-    state.jobs = [job, ...state.jobs];
-  }
-  if (state.jobDrawer?.id === job.id) {
-    state.jobDrawer = job;
-  }
-}
-
-function sourceBadge(service) {
-  const status = service.source_status;
-  if (!status) return `<span class="badge">${escapeHtml(service.source_type)}</span>`;
-  if (!status.available) return `<span class="badge failed"><span class="dot"></span>source failed</span>`;
-  return `<span class="badge success"><span class="dot"></span>${service.source_type === "git" ? "fetched" : "source ok"}</span>`;
-}
-
-function jobBadge(status, action = "") {
-  const cls =
-    status === "success"
-      ? "success"
-      : status === "failed"
-        ? "failed"
-        : status === "running"
-          ? "running"
-          : "queued";
-  return `<span class="badge ${cls}"><span class="dot"></span>${escapeHtml(action ? `${action} ${status}` : status || "unknown")}</span>`;
-}
-
-function parseRuntimeStatus(serviceName, environment, response) {
-  const summary = response?.summary || {};
-  const raw = String(response?.log || "");
-  const running = Boolean(summary.running);
-  const states = Array.isArray(summary.containers) ? summary.containers.map((item) => item.state) : [];
-  const stopped = states.some((value) => ["exited", "stopped", "dead", "created", "removing"].includes(value));
-  const health = summary.health || "unknown";
-  return {
-    service: serviceName,
-    environment,
+function statusFor(environment, project) {
+  return state.runtimeStatus[projectKey(environment, project)] || {
     loading: false,
-    available: response?.status === "success",
-    running,
-    state: running ? "running" : stopped || response?.status === "success" ? "stopped" : "unknown",
-    health,
-    raw,
+    state: "unknown",
+    health: "unknown",
+    raw: "",
   };
 }
 
-function runtimeStatus(serviceName, environment) {
-  return (
-    state.runtimeStatus[runtimeKey(serviceName, environment)] || {
-      loading: true,
-      available: false,
-      running: false,
-      state: "unknown",
-      health: "unknown",
-      raw: "",
-    }
-  );
+function parseStatus(environment, project, response) {
+  const summary = response?.summary || {};
+  const containers = Array.isArray(summary.containers) ? summary.containers : [];
+  const states = containers.map((item) => item.state);
+  const running = Boolean(summary.running);
+  const stopped = states.some((value) => ["exited", "stopped", "dead", "created", "removing"].includes(value));
+  return {
+    loading: false,
+    state: running ? "running" : stopped || response?.status === "success" ? "stopped" : "unknown",
+    health: summary.health || "unknown",
+    raw: response?.log || "",
+  };
 }
 
-function runtimePreview(serviceName, environment) {
-  return (
-    state.runtimePreview[runtimeKey(serviceName, environment)] || {
-      loading: true,
-      valid: false,
-      errors: [],
-      source_path: "",
-      manifest_path: "",
-      compose_files: [],
-      public_url: null,
-      env_file_path: "",
-      env_file_content: "",
-      override_path: "",
-      override_content: "",
-    }
-  );
+function badge(status, text) {
+  const cls = status === "success" ? "success" : status === "failed" ? "failed" : status === "running" ? "running" : "";
+  return `<span class="badge ${cls}"><span class="dot"></span>${escapeHtml(text)}</span>`;
 }
 
-function renderValidationErrors(errors) {
-  if (!errors?.length) return "";
-  return `
-    <div class="inline-error">
-      <div class="error-title">Validation errors</div>
-      <div class="error-list">
-        ${errors.map((item) => `<div><span class="mono">${escapeHtml(item.scope)}</span>: ${escapeHtml(item.message)}</div>`).join("")}
-      </div>
-    </div>
-  `;
-}
-
-function renderPreviewSummary(serviceName, environment) {
-  const preview = runtimePreview(serviceName, environment);
-  if (preview.loading) {
-    return `<span class="badge"><span class="dot"></span>checking config</span>`;
-  }
-  if (preview.valid) {
-    return `<span class="badge success"><span class="dot"></span>config valid</span>`;
-  }
-  return `<span class="badge failed"><span class="dot"></span>config invalid</span>`;
-}
-
-function renderRuntimeStatus(serviceName, environment) {
-  const summary = runtimeStatus(serviceName, environment);
-  if (summary.loading) {
-    return `<div class="status-stack"><span class="badge"><span class="dot"></span>loading</span></div>`;
-  }
-  const stateBadge =
-    summary.state === "running"
-      ? `<span class="badge success"><span class="dot"></span>running</span>`
-      : summary.state === "stopped"
-        ? `<span class="badge"><span class="dot"></span>stopped</span>`
-        : `<span class="badge failed"><span class="dot"></span>unknown</span>`;
-  const healthBadge =
-    summary.health === "healthy"
-      ? `<span class="badge success"><span class="dot"></span>healthy</span>`
-      : summary.health === "unhealthy"
-        ? `<span class="badge failed"><span class="dot"></span>unhealthy</span>`
-        : summary.health === "starting"
-          ? `<span class="badge running"><span class="dot"></span>starting</span>`
-          : `<span class="badge"><span class="dot"></span>no health</span>`;
+function renderRuntimeStatus(environment, project) {
+  const status = statusFor(environment, project);
+  if (status.loading) return `<div class="status-stack">${badge("", "loading")}</div>`;
+  const stateBadge = status.state === "running"
+    ? badge("success", "running")
+    : status.state === "stopped"
+      ? badge("", "stopped")
+      : badge("failed", "unknown");
+  const healthBadge = status.health === "healthy"
+    ? badge("success", "healthy")
+    : status.health === "unhealthy"
+      ? badge("failed", "unhealthy")
+      : status.health === "starting"
+        ? badge("running", "starting")
+        : badge("", "no health");
   return `<div class="status-stack">${stateBadge}${healthBadge}</div>`;
 }
 
-function renderVersionCell(serviceName, environment) {
-  const runtime = runtimeByName(serviceName, environment);
-  if (!runtime) return "-";
-  const ref = runtime.environment.current_ref || runtime.environment.current_version || "-";
-  const commit = shortCommit(runtime.environment.current_commit);
+function renderVersion(project) {
   return `
     <div class="version-stack">
-      <div class="mono">${escapeHtml(ref)}</div>
-      <div class="subtle mono">${escapeHtml(commit)}</div>
+      <div class="mono">${escapeHtml(project.current_ref || project.current_version || project.default_ref || "-")}</div>
+      <div class="subtle mono">${escapeHtml(shortCommit(project.current_commit))}</div>
     </div>
   `;
 }
 
 async function loadAll() {
   try {
-    const [services, environments, jobs] = await Promise.all([
-      api("/api/services"),
+    const [environmentsPayload, jobsPayload, webhooksPayload] = await Promise.all([
       api("/api/environments"),
       api("/api/jobs?limit=100"),
+      api("/api/webhook-events?limit=50"),
     ]);
-    const details = await Promise.all(services.map((service) => api(`/api/services/${service.name}`)));
-    state.services = details;
-    state.environments = environments.environments || [];
-    state.jobs = jobs.jobs || [];
+    state.environments = environmentsPayload.environments || [];
+    state.jobs = jobsPayload.jobs || [];
+    state.webhookEvents = webhooksPayload.events || [];
+    const projectLists = await Promise.all(
+      state.environments.map((environment) => api(`/api/environments/${encodeURIComponent(environment.name)}/projects`)),
+    );
+    state.projects = projectLists.flatMap((item) => item.projects || []);
     state.loadError = "";
-    ensureExpandedState();
     syncCurrentView();
-    render();
-    if (state.currentView.name === "runtime") {
-      loadRuntimePreview(state.currentView.service, state.currentView.environment, true);
+    if (state.currentView.name === "project") {
+      await refreshProject(state.currentView.environment, state.currentView.project);
     }
-    refreshRuntimeStatuses();
+    render();
+    refreshStatuses();
   } catch (error) {
     state.loadError = error.message;
     render();
-    throw error;
   }
-}
-
-function ensureExpandedState() {
-  state.services.forEach((service) => {
-    if (state.expandedServices[service.name] === undefined) {
-      state.expandedServices[service.name] = false;
-    }
-  });
 }
 
 function syncCurrentView() {
-  if (state.currentView.name === "services") {
-    state.currentView = { name: "environments" };
+  if (state.currentView.name === "environment" && !state.environments.some((item) => item.name === state.currentView.environment)) {
+    state.currentView = { name: "dashboard" };
   }
-  if (state.currentView.name === "environment" && !environmentByName(state.currentView.environment)) {
-    state.currentView = { name: "environments" };
+  if (state.currentView.name === "project" && !projectByName(state.currentView.environment, state.currentView.project)) {
+    state.currentView = { name: "dashboard" };
   }
-  if (state.currentView.name === "service" && !serviceByName(state.currentView.service)) {
-    state.currentView = { name: "environments" };
-  }
-  if (state.currentView.name === "runtime" && !runtimeByName(state.currentView.service, state.currentView.environment)) {
-    state.currentView = { name: "environments" };
-  }
-  if (state.jobsFilter.service && !serviceByName(state.jobsFilter.service)) {
-    state.jobsFilter.service = "";
-  }
-  persistJobsFilter();
 }
 
-async function refreshRuntimeStatuses() {
-  const runtimes = state.services.flatMap((service) =>
-    serviceEnvironmentNames(service).map((environment) => ({ service: service.name, environment })),
-  );
-  runtimes.forEach(({ service, environment }) => {
-    state.runtimeStatus[runtimeKey(service, environment)] = {
-      ...runtimeStatus(service, environment),
-      loading: true,
-    };
+async function refreshStatuses() {
+  const projects = state.projects;
+  projects.forEach((project) => {
+    state.runtimeStatus[projectKey(project.environment, project.name)] = { ...statusFor(project.environment, project.name), loading: true };
   });
   render();
-  const results = await Promise.all(
-    runtimes.map(async ({ service, environment }) => {
-      try {
-        const response = await api(`/api/services/${service}/status?environment=${environment}`);
-        return parseRuntimeStatus(service, environment, response);
-      } catch (error) {
-        return {
-          service,
-          environment,
-          loading: false,
-          available: false,
-          running: false,
-          state: "unknown",
-          health: "unknown",
-          raw: String(error.message),
-        };
-      }
-    }),
-  );
-  results.forEach((item) => {
-    state.runtimeStatus[runtimeKey(item.service, item.environment)] = item;
+  const results = await Promise.all(projects.map(async (project) => {
+    try {
+      const response = await api(`/api/environments/${encodeURIComponent(project.environment)}/projects/${encodeURIComponent(project.name)}/status`);
+      return { project, status: parseStatus(project.environment, project.name, response) };
+    } catch (error) {
+      return { project, status: { loading: false, state: "unknown", health: "unknown", raw: error.message } };
+    }
+  }));
+  results.forEach(({ project, status }) => {
+    state.runtimeStatus[projectKey(project.environment, project.name)] = status;
   });
   render();
 }
@@ -447,15 +233,7 @@ function setToast(message) {
       state.toast = "";
       render();
     }
-  }, 3500);
-}
-
-function persistServicesFilter() {
-  localStorage.setItem("deployer-services-filter", JSON.stringify(state.servicesFilter));
-}
-
-function persistJobsFilter() {
-  localStorage.setItem("deployer-jobs-filter", JSON.stringify(state.jobsFilter));
+  }, 3000);
 }
 
 function render() {
@@ -465,28 +243,15 @@ function render() {
       <main class="main">
         ${renderTopbar()}
         <section class="content">
-          ${state.loadError ? renderLoadErrorBanner() : ""}
+          ${state.loadError ? renderError(state.loadError) : ""}
           ${renderCurrentView()}
         </section>
       </main>
-      ${state.actionMenu ? renderActionMenuOverlay() : ""}
-      ${state.logsDrawer ? renderLogsDrawer() : ""}
-      ${state.historyDrawer ? renderHistoryDrawer() : ""}
-      ${state.jobDrawer ? renderJobDrawer() : ""}
-      ${state.addOpen ? renderAddPanel() : ""}
+      ${state.addProject ? renderAddProjectPanel() : ""}
       ${state.deployModal ? renderDeployModal() : ""}
+      ${state.logsDrawer ? renderLogsDrawer() : ""}
+      ${state.jobDrawer ? renderJobDrawer() : ""}
       ${state.toast ? `<div class="toast">${escapeHtml(state.toast)}</div>` : ""}
-    </div>
-  `;
-}
-
-function renderLoadErrorBanner() {
-  return `
-    <div class="inline-error banner-error">
-      <div class="error-title">Failed to refresh data</div>
-      <div class="error-list">
-        <div>${escapeHtml(state.loadError)}</div>
-      </div>
     </div>
   `;
 }
@@ -498,18 +263,18 @@ function renderSidebar() {
         <div class="brand-mark">P</div>
         <div>
           <div class="brand-title">PaaS Deployer</div>
-          <div class="brand-subtitle">personal control plane</div>
+          <div class="brand-subtitle">environment projects</div>
         </div>
       </div>
       <div class="nav-block">
         <div class="nav-label">Workspace</div>
-        <button class="nav-item ${state.currentView.name === "environments" ? "active" : ""}" onclick="showServicesPage()">${icon("server")} Environments</button>
-        <button class="nav-item ${state.currentView.name === "jobs" ? "active" : ""}" onclick="showJobsPage()">${icon("list")} Jobs</button>
+        <button class="nav-item ${state.currentView.name === "dashboard" ? "active" : ""}" onclick="openDashboard()">${icon("server")} Environments</button>
+        <button class="nav-item ${state.currentView.name === "jobs" ? "active" : ""}" onclick="openJobs()">${icon("list")} Jobs</button>
+        <button class="nav-item ${state.currentView.name === "webhooks" ? "active" : ""}" onclick="openWebhooks()">${icon("history")} Webhooks</button>
       </div>
       <div class="nav-block service-list">
-        <div class="nav-label">Environments</div>
+        <div class="nav-label">Projects</div>
         ${state.environments.map(renderSidebarEnvironment).join("")}
-        ${renderSidebarUnassigned()}
       </div>
       <div class="nav-block">
         <button class="nav-item" onclick="toggleTheme()">${icon(state.theme === "dark" ? "sun" : "moon")} ${state.theme === "dark" ? "Light theme" : "Dark theme"}</button>
@@ -519,885 +284,632 @@ function renderSidebar() {
 }
 
 function renderSidebarEnvironment(environment) {
-  const expanded = state.expandedServices[`env:${environment.name}`];
-  const services = servicesForEnvironment(environment.name);
-  const isEnvironmentPage = state.currentView.name === "environment" && state.currentView.environment === environment.name;
+  const projects = projectsForEnvironment(environment.name);
   return `
     <div class="tree-item">
-      <button class="nav-item ${isEnvironmentPage ? "active" : ""}" onclick="openEnvironmentPage('${escapeHtml(environment.name)}')">
-        <span class="tree-chevron" onclick="event.stopPropagation();toggleEnvironmentTree('${escapeHtml(environment.name)}')">${expanded ? icon("chevronDown", 14) : icon("chevronRight", 14)}</span>
+      <button class="nav-item ${state.currentView.name === "environment" && state.currentView.environment === environment.name ? "active" : ""}" onclick="openEnvironment(${js(environment.name)})">
         <span class="badge mono">${escapeHtml(environment.name)}</span>
-        <span class="ellipsis">${services.length} services</span>
+        <span class="ellipsis">${projects.length} projects</span>
       </button>
-      ${expanded
-        ? `
-          <div class="tree-children">
-            ${services.map((service) => `
-              <button class="nav-item child ${state.currentView.name === "runtime" && state.currentView.service === service.name && state.currentView.environment === environment.name ? "active" : ""}" onclick="openRuntimePage('${escapeHtml(service.name)}', '${escapeHtml(environment.name)}')">
-                <span class="tree-indent"></span>
-                <span class="dot" style="color:${serviceColor(service.name)}"></span>
-                <span class="ellipsis">${escapeHtml(service.name)}</span>
-              </button>
-            `).join("")}
-            ${services.length ? "" : `<div class="nav-empty">No services attached</div>`}
-          </div>
-        `
-        : ""}
+      <div class="tree-children">
+        ${projects.map((project) => `
+          <button class="nav-item child ${state.currentView.name === "project" && state.currentView.environment === project.environment && state.currentView.project === project.name ? "active" : ""}" onclick="openProject(${js(project.environment)}, ${js(project.name)})">
+            <span class="tree-indent"></span>
+            <span class="dot" style="color:${projectColor(project.name)}"></span>
+            <span class="ellipsis">${escapeHtml(project.name)}</span>
+          </button>
+        `).join("")}
+      </div>
     </div>
-  `;
-}
-
-function renderSidebarUnassigned() {
-  const services = unassignedServices();
-  if (!services.length) return "";
-  return `
-    <div class="nav-label top-gap">Unassigned</div>
-    ${services.map((service) => `
-      <button class="nav-item ${state.currentView.name === "service" && state.currentView.service === service.name ? "active" : ""}" onclick="openServicePage('${escapeHtml(service.name)}')">
-        <span class="tree-indent"></span>
-        <span class="dot" style="color:${serviceColor(service.name)}"></span>
-        <span class="ellipsis">${escapeHtml(service.name)}</span>
-      </button>
-    `).join("")}
   `;
 }
 
 function renderTopbar() {
   const activeJobs = state.jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
   const failedJobs = state.jobs.filter((job) => job.status === "failed").length;
-  const title = state.currentView.name === "jobs"
-    ? "Runtime jobs"
-    : state.currentView.name === "service"
-      ? `Service: ${state.currentView.service}`
-      : state.currentView.name === "runtime"
-        ? `Runtime: ${state.currentView.environment}/${state.currentView.service}`
-        : state.currentView.name === "environment"
-          ? `Environment: ${state.currentView.environment}`
+  const title = state.currentView.name === "project"
+    ? `${state.currentView.environment}/${state.currentView.project}`
+    : state.currentView.name === "environment"
+      ? `Environment: ${state.currentView.environment}`
+      : state.currentView.name === "jobs"
+        ? "Runtime jobs"
+        : state.currentView.name === "webhooks"
+          ? "Webhook events"
           : "Environments dashboard";
   return `
     <header class="topbar">
       <div>
         <h1>${escapeHtml(title)}</h1>
-        <div class="hint">${state.services.length} services · ${activeJobs} active jobs · ${failedJobs} failed jobs</div>
+        <div class="hint">${state.environments.length} environments · ${state.projects.length} projects · ${activeJobs} active jobs · ${failedJobs} failed jobs</div>
       </div>
       <div class="spacer"></div>
       <button class="btn secondary" onclick="refreshData()">${icon("refresh")} Refresh</button>
-      ${state.currentView.name !== "jobs" ? `<button class="btn primary" onclick="openAddService()">${icon("plus")} Add service</button>` : ""}
+      ${state.currentView.name !== "jobs" && state.currentView.name !== "webhooks" ? `<button class="btn primary" onclick="openAddProject()">${icon("plus")} Add project</button>` : ""}
     </header>
   `;
 }
 
 function renderCurrentView() {
   if (state.currentView.name === "jobs") return renderJobsView();
-  if (state.currentView.name === "service") return renderServicePage();
-  if (state.currentView.name === "runtime") return renderRuntimePage();
-  if (state.currentView.name === "environment") return renderEnvironmentPage();
-  return renderServicesView();
+  if (state.currentView.name === "webhooks") return renderWebhooksView();
+  if (state.currentView.name === "environment") return renderEnvironmentView();
+  if (state.currentView.name === "project") return renderProjectView();
+  return renderDashboard();
 }
 
-function serviceFilterMatch(service, environment) {
-  const filter = state.servicesFilter;
-  const summary = runtimeStatus(service.name, environment);
-  if (filter.environment && filter.environment !== environment) return false;
-  if (
-    filter.status &&
-    ((filter.status === "running" && summary.state !== "running") ||
-      (filter.status === "stopped" && summary.state !== "stopped") ||
-      (filter.status === "problem" && !["unknown"].includes(summary.state) && summary.health !== "unhealthy"))
-  ) {
-    return false;
-  }
-  return matchesQuery(
-    [
-      service.name,
-      environment,
-      service.source_status?.current_ref,
-      service.source_status?.current_commit,
-      runtimeUrl(service.name, environment),
-      envSummary(service, environment).current_ref,
-      envSummary(service, environment).current_commit,
-    ],
-    filter.query,
-  );
-}
-
-function clearServicesFilter() {
-  state.servicesFilter = { query: "", environment: "", status: "" };
-  persistServicesFilter();
-  render();
-}
-
-function clearJobsFilter() {
-  state.jobsFilter = { query: "", service: "", environment: "", status: "" };
-  persistJobsFilter();
-  render();
-}
-
-function renderFilterEmptyState(title, message, resetHandler) {
-  return `
-    <div class="empty compact-empty">
-      <div style="font-weight:800">${escapeHtml(title)}</div>
-      <div>${escapeHtml(message)}</div>
-      <button class="btn secondary" onclick="${resetHandler}()">${icon("refresh")} Clear filters</button>
-    </div>
-  `;
-}
-
-function renderServicesView() {
-  const successful = state.jobs.filter((job) => job.status === "success").length;
-  const failed = state.jobs.filter((job) => job.status === "failed").length;
-  const environmentNames = allEnvironmentNames();
-  const environments = state.environments.filter((environment) => {
-    if (state.servicesFilter.environment && state.servicesFilter.environment !== environment.name) return false;
-    return servicesForEnvironment(environment.name).some((service) => serviceFilterMatch(service, environment.name));
+function renderDashboard() {
+  const query = state.filters.query.toLowerCase();
+  const filteredProjects = state.projects.filter((project) => {
+    if (state.filters.environment && project.environment !== state.filters.environment) return false;
+    if (query && ![project.environment, project.name, project.source_url, project.source_path, project.current_ref, project.current_commit].some((value) => String(value || "").toLowerCase().includes(query))) return false;
+    if (state.filters.status && statusFor(project.environment, project.name).state !== state.filters.status) return false;
+    return true;
   });
-  const emptyServices = unassignedServices().filter((service) =>
-    matchesQuery([service.name, service.source_url, service.source_path, service.source_status?.current_commit], state.servicesFilter.query),
-  );
   return `
     <div class="toolbar">
       <div>
-        <div class="headline">Environments</div>
-        <div class="muted">Primary control surface. Services live inside explicit runtime environments.</div>
-      </div>
-      <div class="row wrap">
-        <span class="badge success"><span class="dot"></span>${successful} successful</span>
-        <span class="badge failed"><span class="dot"></span>${failed} failed</span>
+        <div class="headline">Environment Projects</div>
+        <div class="muted">Projects are owned by environments. There is no shared service attachment layer.</div>
       </div>
     </div>
     <div class="filter-bar card">
-      <div class="field grow">
-        <label>Search</label>
-        <input class="input" value="${escapeHtml(state.servicesFilter.query)}" placeholder="service, ref, commit, url" oninput="setServicesFilter('query', this.value)">
-      </div>
-      <div class="field">
-        <label>Environment</label>
-        <select class="select" onchange="setServicesFilter('environment', this.value)">
-          <option value="">all</option>
-          ${environmentNames.map((environment) => `<option value="${escapeHtml(environment)}" ${state.servicesFilter.environment === environment ? "selected" : ""}>${escapeHtml(environment)}</option>`).join("")}
-        </select>
-      </div>
-      <div class="field">
-        <label>Status</label>
-        <select class="select" onchange="setServicesFilter('status', this.value)">
-          <option value="">all</option>
-          <option value="running" ${state.servicesFilter.status === "running" ? "selected" : ""}>running</option>
-          <option value="stopped" ${state.servicesFilter.status === "stopped" ? "selected" : ""}>stopped</option>
-          <option value="problem" ${state.servicesFilter.status === "problem" ? "selected" : ""}>problem</option>
-        </select>
-      </div>
+      <div class="field grow"><label>Search</label><input class="input" value="${escapeHtml(state.filters.query)}" placeholder="project, ref, commit, source" oninput="setFilter('query', this.value)"></div>
+      <div class="field"><label>Environment</label><select class="select" onchange="setFilter('environment', this.value)"><option value="">all</option>${state.environments.map((env) => `<option value="${escapeHtml(env.name)}" ${state.filters.environment === env.name ? "selected" : ""}>${escapeHtml(env.name)}</option>`).join("")}</select></div>
+      <div class="field"><label>Status</label><select class="select" onchange="setFilter('status', this.value)"><option value="">all</option><option value="running" ${state.filters.status === "running" ? "selected" : ""}>running</option><option value="stopped" ${state.filters.status === "stopped" ? "selected" : ""}>stopped</option><option value="unknown" ${state.filters.status === "unknown" ? "selected" : ""}>unknown</option></select></div>
     </div>
-    ${state.services.length || state.environments.length
-      ? `
-        ${environments.map(renderEnvironmentSection).join("")}
-        ${emptyServices.length ? renderUnassignedSection(emptyServices) : ""}
-        ${!environments.length && !emptyServices.length ? renderFilterEmptyState("No services match the current filters", "Try another search string or reset the filters.", "clearServicesFilter") : ""}
-      `
-      : renderEmpty()}
-  `;
-}
-
-function renderEnvironmentSection(environment) {
-  const services = servicesForEnvironment(environment.name).filter((service) => serviceFilterMatch(service, environment.name));
-  if (!services.length) return "";
-  return `
-    <section class="card page-card environment-section">
-      <div class="page-header">
-        <div>
-          <div class="headline-small">${escapeHtml(environment.name)}</div>
-          <div class="muted mono">${escapeHtml(environment.url_prefix ? `*.${environment.url_prefix}.busypage.ru` : "*.busypage.ru")} · ${escapeHtml(deployPolicyLabel(environment))}</div>
-        </div>
-        <div class="row wrap">
-          <button class="btn secondary" onclick="openEnvironmentPage('${escapeHtml(environment.name)}')">Open environment</button>
-        </div>
-      </div>
-      <div class="table table-wide">
-        <div class="table-row table-head environment-services-head">
-          <div>Service</div>
-          <div>Link</div>
-          <div>Status</div>
-          <div>Version</div>
-          <div>Quick</div>
-          <div>Actions</div>
-        </div>
-        ${services.map((service) => renderServiceTableRow(service, environment.name, { showEnvironment: false })).join("")}
-      </div>
+    <section class="card page-card">
+      ${filteredProjects.length ? renderProjectTable(filteredProjects, true) : renderEmpty("No projects match the current filters")}
     </section>
   `;
 }
 
-function renderUnassignedSection(services) {
-  return `
-    <section class="card page-card environment-section">
-      <div class="page-header">
-        <div>
-          <div class="headline-small">Unassigned services</div>
-          <div class="muted">Catalog entries that are not attached to any environment yet.</div>
-        </div>
-      </div>
-      <div class="unassigned-grid">
-        ${services.map((service) => `
-          <button class="runtime-mini-card" onclick="openServicePage('${escapeHtml(service.name)}')">
-            <div class="service-cell">
-              <div class="service-icon small" style="background:${serviceColor(service.name)}">${escapeHtml(serviceInitials(service.name))}</div>
-              <div>
-                <div class="service-link-button">${escapeHtml(service.name)}</div>
-                <div class="subtle mono ellipsis">${escapeHtml(formatSource(service))}</div>
-              </div>
-            </div>
-          </button>
-        `).join("")}
-      </div>
-    </section>
-  `;
-}
-
-function renderServiceTableRow(service, environment, options = {}) {
-  const summary = runtimeStatus(service.name, environment);
-  const activeJob = activeJobForRuntime(service.name, environment);
-  const visibleFailure = latestVisibleFailure(service.name, environment);
-  const canOpenLink = summary.running;
-  const publicUrl = runtimeUrl(service.name, environment);
-  const showEnvironment = options.showEnvironment !== false;
-  return `
-    <div class="table-row ${showEnvironment ? "services-table-row" : "environment-services-row"}">
-      <div class="service-cell">
-        <div class="service-icon small" style="background:${serviceColor(service.name)}">${escapeHtml(serviceInitials(service.name))}</div>
-        <div>
-          <div class="service-link-button" onclick="openServicePage('${escapeHtml(service.name)}')">${escapeHtml(service.name)}</div>
-          <div class="subtle mono ellipsis">${escapeHtml(shortCommit(service.source_status?.current_commit))}</div>
-        </div>
-      </div>
-      ${showEnvironment ? `<div><span class="badge">${escapeHtml(environment)}</span></div>` : ""}
-      <div>
-        ${canOpenLink
-          ? `<a class="table-link mono" href="${escapeHtml(publicUrl)}" target="_blank" rel="noreferrer">${escapeHtml(publicUrl)}</a>`
-          : `<span class="subtle">not exposed</span>`}
-      </div>
-      <div>
-        ${renderRuntimeStatus(service.name, environment)}
-        ${activeJob ? `<div class="subtle mono top-gap">${escapeHtml(activeJob.action)}</div>` : ""}
-        ${!activeJob && visibleFailure ? `<div class="failure-note top-gap">last ${escapeHtml(visibleFailure.action)} failed</div>` : ""}
-      </div>
-      <div>${renderVersionCell(service.name, environment)}</div>
-      <div class="quick-actions">
-        <button class="btn ghost" onclick="openServicePage('${escapeHtml(service.name)}')">Service</button>
-        <button class="btn ghost" onclick="openLogsDrawer('${escapeHtml(service.name)}', '${environment}')">Logs</button>
-        <button class="btn ghost" onclick="openRuntimePage('${escapeHtml(service.name)}', '${environment}')">Settings</button>
-      </div>
-      <div class="action-menu-wrap">
-        <button class="btn secondary" onclick="toggleActionMenu(event, '${escapeHtml(service.name)}', '${environment}')">${icon("more")} Actions</button>
-      </div>
-    </div>
-  `;
-}
-
-function renderActionMenuOverlay() {
-  return `
-    <button class="action-menu-backdrop" onclick="closeActionMenu()" aria-label="Close actions menu"></button>
-    ${renderActionMenu(state.actionMenu.service, state.actionMenu.environment, state.actionMenu.top, state.actionMenu.left)}
-  `;
-}
-
-function renderActionMenu(serviceName, environment, top, left) {
-  return `
-    <div class="action-menu action-menu-floating" style="top:${top}px;left:${left}px">
-      <button class="action-item" onclick="openDeployModal('${escapeHtml(serviceName)}', '${environment}')">Deploy</button>
-      <button class="action-item" onclick="runtimeAction('${escapeHtml(serviceName)}', 'restart', '${environment}')">Restart</button>
-      <button class="action-item" onclick="runtimeAction('${escapeHtml(serviceName)}', 'stop', '${environment}')">Stop</button>
-      <button class="action-item" onclick="runtimeAction('${escapeHtml(serviceName)}', 'down', '${environment}')">Down</button>
-      <button class="action-item" onclick="openHistoryDrawer('${escapeHtml(serviceName)}', '${environment}')">History</button>
-    </div>
-  `;
-}
-
-function renderEnvironmentPage() {
-  const environment = environmentByName(state.currentView.environment);
-  if (!environment) return renderMissing("Unknown environment");
-  const services = servicesForEnvironment(environment.name);
-  const available = state.services.filter((service) => !serviceEnvironmentNames(service).includes(environment.name));
+function renderEnvironmentView() {
+  const environment = state.environments.find((item) => item.name === state.currentView.environment);
+  if (!environment) return renderEmpty("Unknown environment");
+  const projects = projectsForEnvironment(environment.name);
   return `
     <div class="page-stack">
       <section class="card page-card">
         <div class="page-header">
           <div>
             <div class="headline-small">${escapeHtml(environment.name)}</div>
-            <div class="muted">Runtime environment containing explicitly attached services.</div>
+            <div class="muted mono">${escapeHtml(environment.url_prefix ? `*.${environment.url_prefix}.busypage.ru` : "*.busypage.ru")}</div>
           </div>
-          <div class="row wrap">
-            <span class="badge mono">${escapeHtml(environment.url_prefix || "root")}</span>
-            <span class="badge">${escapeHtml(deployPolicyLabel(environment))}</span>
-          </div>
+          <button class="btn primary" onclick="openAddProject(${js(environment.name)})">${icon("plus")} Add project</button>
         </div>
         <div class="runtime-page-grid">
-          <div class="fact">
-            <span class="fact-label">URL prefix</span>
-            <span class="fact-value mono">${escapeHtml(environment.url_prefix || "(none)")}</span>
-          </div>
-          <div class="fact">
-            <span class="fact-label">Deploy mode</span>
-            <span class="fact-value mono">${escapeHtml(environment.deploy_mode)}</span>
-          </div>
-          <div class="fact">
-            <span class="fact-label">Deploy source</span>
-            <span class="fact-value mono">${escapeHtml(environment.deploy_source || "-")}</span>
-          </div>
-          <div class="fact">
-            <span class="fact-label">Pattern</span>
-            <span class="fact-value mono">${escapeHtml(environment.deploy_pattern || "-")}</span>
-          </div>
+          <div class="fact"><span class="fact-label">URL prefix</span><span class="fact-value mono">${escapeHtml(environment.url_prefix || "(none)")}</span></div>
+          <div class="fact"><span class="fact-label">Projects</span><span class="fact-value mono">${projects.length}</span></div>
         </div>
       </section>
       <section class="card page-card">
-        <div class="page-header">
-          <div>
-            <div class="section-title">Services in ${escapeHtml(environment.name)}</div>
-            <div class="muted">Attach catalog services here before deploying them into this environment.</div>
-          </div>
-          ${available.length ? `
-            <form class="inline-form compact-form" onsubmit="attachServiceToEnvironment(event, '${escapeHtml(environment.name)}')">
-              <select class="select" name="service" required>
-                <option value="">select service</option>
-                ${available.map((service) => `<option value="${escapeHtml(service.name)}">${escapeHtml(service.name)}</option>`).join("")}
-              </select>
-              <button class="btn primary" type="submit">${icon("plus")} Attach</button>
-            </form>
-          ` : ""}
-        </div>
-        ${services.length
-          ? `
-            <div class="table table-wide">
-              <div class="table-row table-head environment-services-head">
-                <div>Service</div>
-                <div>Link</div>
-                <div>Status</div>
-                <div>Version</div>
-                <div>Quick</div>
-                <div>Actions</div>
-              </div>
-              ${services.map((service) => renderServiceTableRow(service, environment.name, { showEnvironment: false })).join("")}
-            </div>
-          `
-          : `<div class="table-empty muted">No services attached to ${escapeHtml(environment.name)} yet.</div>`}
+        ${projects.length ? renderProjectTable(projects, false) : renderEmpty(`No projects in ${environment.name}`)}
       </section>
     </div>
   `;
 }
 
-function renderServicePage() {
-  const service = serviceByName(state.currentView.service);
-  if (!service) return renderMissing("Unknown service");
-  const available = state.environments.filter((environment) => !serviceEnvironmentNames(service).includes(environment.name));
+function renderProjectTable(projects, showEnvironment) {
+  return `
+    <div class="table table-wide">
+      <div class="table-row table-head environment-services-head">
+        <div>Project</div>
+        ${showEnvironment ? "<div>Env</div>" : ""}
+        <div>Links</div>
+        <div>Status</div>
+        <div>Version</div>
+        <div>Policy</div>
+        <div>Actions</div>
+      </div>
+      ${projects.map((project) => renderProjectRow(project, showEnvironment)).join("")}
+    </div>
+  `;
+}
+
+function renderProjectRow(project, showEnvironment) {
+  const active = activeJob(project.environment, project.name);
+  const last = latestJob(project.environment, project.name);
+  const failed = !active && last?.status === "failed";
+  return `
+    <div class="table-row ${showEnvironment ? "services-table-row" : "environment-services-row"}">
+      <div class="service-cell">
+        <div class="service-icon small" style="background:${projectColor(project.name)}">${escapeHtml(initials(project.name))}</div>
+        <div>
+          <button class="service-link-button" onclick="openProject(${js(project.environment)}, ${js(project.name)})">${escapeHtml(project.name)}</button>
+          <div class="subtle mono ellipsis">${escapeHtml(project.source_url || project.source_path || "-")}</div>
+        </div>
+      </div>
+      ${showEnvironment ? `<div><span class="badge">${escapeHtml(project.environment)}</span></div>` : ""}
+      <div>${renderProjectLinks(project)}</div>
+      <div>
+        ${renderRuntimeStatus(project.environment, project.name)}
+        ${active ? `<div class="subtle mono top-gap">${escapeHtml(active.action)}</div>` : ""}
+        ${failed ? `<div class="failure-note top-gap">last ${escapeHtml(last.action)} failed</div>` : ""}
+      </div>
+      <div>${renderVersion(project)}</div>
+      <div><span class="badge">${escapeHtml(deployPolicyLabel(project))}</span>${project.candidate_ref ? `<div class="badge running top-gap">candidate ${escapeHtml(project.candidate_ref)}</div>` : ""}</div>
+      <div class="quick-actions">
+        <button class="btn ghost" onclick="openProject(${js(project.environment)}, ${js(project.name)})">Settings</button>
+        <button class="btn ghost" onclick="openLogs(${js(project.environment)}, ${js(project.name)})">Logs</button>
+        <button class="btn primary" onclick="openDeploy(${js(project.environment)}, ${js(project.name)})">Deploy</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderProjectLinks(project) {
+  const links = project.public_urls || [];
+  if (!links.length) return `<span class="subtle">not exposed</span>`;
+  return links.map((url) => `<a class="table-link mono" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(url)}</a>`).join("<br>");
+}
+
+function renderProjectView() {
+  const project = projectByName(state.currentView.environment, state.currentView.project);
+  if (!project) return renderEmpty("Unknown project");
+  const jobs = state.jobs.filter((job) => job.environment === project.environment && job.project === project.name);
   return `
     <div class="page-stack">
       <section class="card page-card">
         <div class="page-header">
           <div class="service-title">
-            <div class="service-icon" style="background:${serviceColor(service.name)}">${escapeHtml(serviceInitials(service.name))}</div>
+            <div class="service-icon" style="background:${projectColor(project.name)}">${escapeHtml(initials(project.name))}</div>
             <div>
-              <h2 class="service-name">${escapeHtml(service.name)}</h2>
-              <div class="muted">Shared service definition and source settings.</div>
+              <h2 class="service-name">${escapeHtml(project.environment)}/${escapeHtml(project.name)}</h2>
+              <div class="muted">Environment-owned project. Runtime config is stored in deployer.</div>
             </div>
           </div>
-          <div class="row wrap">
-            ${sourceBadge(service)}
-            ${service.source_status?.current_ref ? `<span class="badge mono">${escapeHtml(service.source_status.current_ref)}</span>` : ""}
-            ${service.source_status?.current_commit ? `<span class="badge mono">${escapeHtml(shortCommit(service.source_status.current_commit))}</span>` : ""}
-          </div>
+          <div class="row wrap">${renderRuntimeStatus(project.environment, project.name)}</div>
         </div>
-        <div class="details-grid">
-          <div class="field"><label>Source type</label><input class="input" value="${escapeHtml(service.source_type)}" disabled></div>
-          <div class="field"><label>Default branch</label><input class="input mono" value="${escapeHtml(service.default_branch || "")}" disabled></div>
-          <div class="field field-span"><label>Source</label><input class="input mono" value="${escapeHtml(formatSource(service))}" disabled></div>
-          <div class="field field-span"><label>Managed checkout</label><input class="input mono" value="${escapeHtml(service.source_path)}" disabled></div>
+        <div class="runtime-page-grid">
+          <div class="fact"><span class="fact-label">Source</span><span class="fact-value mono">${escapeHtml(project.source_url || project.source_path || "-")}</span></div>
+          <div class="fact"><span class="fact-label">Compose files</span><span class="fact-value mono">${escapeHtml((project.compose_files || []).join(", ") || "(generated)")}</span></div>
+          <div class="fact"><span class="fact-label">Current ref</span><span class="fact-value mono">${escapeHtml(project.current_ref || project.default_ref || "-")}</span></div>
+          <div class="fact"><span class="fact-label">Current commit</span><span class="fact-value mono">${escapeHtml(shortCommit(project.current_commit))}</span></div>
+          <div class="fact"><span class="fact-label">Deploy policy</span><span class="fact-value mono">${escapeHtml(deployPolicyLabel(project))}</span></div>
         </div>
-        ${service.source_status?.error ? `<div class="inline-error">${escapeHtml(service.source_status.error)}</div>` : ""}
+        ${project.candidate_ref ? renderCandidate(project) : ""}
+        <div class="runtime-button-row">
+          <button class="btn primary" onclick="openDeploy(${js(project.environment)}, ${js(project.name)})">${icon("play")} Deploy</button>
+          ${project.candidate_ref ? `<button class="btn primary" onclick="deployCandidate(${js(project.environment)}, ${js(project.name)})">${icon("play")} Deploy candidate</button>` : ""}
+          <button class="btn secondary" onclick="runtimeAction(${js(project.environment)}, ${js(project.name)}, 'restart')">${icon("refresh")} Restart</button>
+          <button class="btn secondary" onclick="runtimeAction(${js(project.environment)}, ${js(project.name)}, 'stop')">${icon("stop")} Stop</button>
+          <button class="btn danger" onclick="runtimeAction(${js(project.environment)}, ${js(project.name)}, 'down')">${icon("trash")} Down</button>
+          <button class="btn secondary" onclick="openLogs(${js(project.environment)}, ${js(project.name)})">${icon("list")} Logs</button>
+        </div>
       </section>
       <section class="card page-card">
-        <div class="page-header">
-          <div>
-            <div class="section-title">Attached environments</div>
-            <div class="muted">This service only exists in environments listed here.</div>
-          </div>
-          ${available.length ? `
-            <form class="inline-form compact-form" onsubmit="attachEnvironmentToService(event, '${escapeHtml(service.name)}')">
-              <select class="select" name="environment" required>
-                <option value="">select environment</option>
-                ${available.map((environment) => `<option value="${escapeHtml(environment.name)}">${escapeHtml(environment.name)}</option>`).join("")}
-              </select>
-              <button class="btn primary" type="submit">${icon("plus")} Attach</button>
-            </form>
-          ` : ""}
-        </div>
-        <div class="runtime-mini-grid">
-          ${serviceEnvironmentNames(service).length ? serviceEnvironmentNames(service).map((environment) => `
-            <button class="runtime-mini-card" onclick="openRuntimePage('${escapeHtml(service.name)}', '${environment}')">
-              <div class="runtime-mini-head">
-                <span class="badge">${escapeHtml(environment)}</span>
-                ${renderRuntimeStatus(service.name, environment)}
-              </div>
-              <div class="muted mono">${escapeHtml(runtimeUrl(service.name, environment) || "-")}</div>
-              <div class="muted mono top-gap">${escapeHtml(deployPolicyLabel(envSummary(service, environment)))}</div>
-              <div class="mono top-gap">${escapeHtml(envSummary(service, environment).current_ref || "-")}</div>
-            </button>
-          `).join("") : `<div class="table-empty muted">This service is not attached to any environment.</div>`}
-        </div>
+        <div class="page-header"><div><div class="section-title">Configuration</div><div class="muted">Components, endpoints, dependencies, and env vars for this environment project.</div></div></div>
+        ${renderProjectConfig(project)}
       </section>
-      <section class="card page-card danger-card">
-        <div class="section-title">Danger zone</div>
-        <button class="btn danger" onclick="removeService('${escapeHtml(service.name)}')">${icon("trash")} Remove service from catalog</button>
+      <section class="card page-card">
+        <div class="page-header"><div><div class="section-title">Recent jobs</div><div class="muted">Latest runtime actions for this project.</div></div></div>
+        ${renderJobsTable(jobs.slice(0, 8))}
       </section>
     </div>
   `;
 }
 
-function renderRuntimePage() {
-  const service = serviceByName(state.currentView.service);
-  if (!service) return renderMissing("Unknown service");
-  const environment = state.currentView.environment;
-  const env = envSummary(service, environment);
-  const envPairs = Object.entries(env.env || {});
-  const summary = runtimeStatus(service.name, environment);
-  const preview = runtimePreview(service.name, environment);
-  const publicUrl = runtimeUrl(service.name, environment);
-  const jobs = state.jobs.filter((job) => job.service === service.name && job.environment === environment);
+function renderCandidate(project) {
   return `
-    <div class="page-stack">
-      <section class="card page-card">
-        <div class="page-header">
-          <div>
-            <div class="headline-small">${escapeHtml(service.name)}/${escapeHtml(environment)}</div>
-            <div class="muted">Runtime-specific settings and actions.</div>
-          </div>
-          <div class="row wrap">
-            ${renderRuntimeStatus(service.name, environment)}
-          </div>
-        </div>
-        <div class="runtime-page-grid">
-          <div class="fact">
-            <span class="fact-label">Public URL</span>
-            <span class="fact-value">${summary.running && publicUrl ? `<a class="table-link mono" href="${escapeHtml(publicUrl)}" target="_blank" rel="noreferrer">${escapeHtml(publicUrl)}</a>` : `<span class="subtle">not exposed</span>`}</span>
-          </div>
-          <div class="fact">
-            <span class="fact-label">Current ref</span>
-            <span class="fact-value mono">${escapeHtml(env.current_ref || env.current_version || "-")}</span>
-          </div>
-          <div class="fact">
-            <span class="fact-label">Current commit</span>
-            <span class="fact-value mono">${escapeHtml(shortCommit(env.current_commit))}</span>
-          </div>
-          <div class="fact">
-            <span class="fact-label">Last deployment</span>
-            <span class="fact-value mono">${escapeHtml(env.last_deployment_id ? `#${env.last_deployment_id}` : "-")}</span>
-          </div>
-          <div class="fact">
-            <span class="fact-label">Deploy policy</span>
-            <span class="fact-value mono">${escapeHtml(deployPolicyLabel(env))}</span>
-          </div>
-        </div>
-        <div class="runtime-button-row">
-          <button class="btn primary" onclick="openDeployModal('${escapeHtml(service.name)}', '${environment}')">${icon("play")} Deploy</button>
-          <button class="btn secondary" onclick="runtimeAction('${escapeHtml(service.name)}', 'restart', '${environment}')">${icon("refresh")} Restart</button>
-          <button class="btn secondary" onclick="runtimeAction('${escapeHtml(service.name)}', 'stop', '${environment}')">${icon("stop")} Stop</button>
-          <button class="btn danger" onclick="runtimeAction('${escapeHtml(service.name)}', 'down', '${environment}')">${icon("trash")} Down</button>
-          <button class="btn secondary" onclick="openLogsDrawer('${escapeHtml(service.name)}', '${environment}')">${icon("list")} Logs</button>
-          <button class="btn secondary" onclick="openHistoryDrawer('${escapeHtml(service.name)}', '${environment}')">${icon("history")} History</button>
-        </div>
-      </section>
-      <section class="card page-card">
-        <div class="page-header">
-          <div>
-            <div class="section-title">Rendered configuration</div>
-            <div class="muted">Current managed env file and generated override for this runtime target.</div>
-          </div>
-          <div class="row wrap">
-            ${renderPreviewSummary(service.name, environment)}
-            <button class="btn secondary" onclick="loadRuntimePreview('${escapeHtml(service.name)}', '${environment}', true)">${icon("refresh")} Reload preview</button>
-          </div>
-        </div>
-        <div class="preview-meta">
-          <div class="fact">
-            <span class="fact-label">Managed env file</span>
-            <span class="fact-value mono">${escapeHtml(preview.env_file_path || "-")}</span>
-          </div>
-          <div class="fact">
-            <span class="fact-label">Managed override</span>
-            <span class="fact-value mono">${escapeHtml(preview.override_path || "-")}</span>
-          </div>
-        </div>
-        ${preview.loading ? `<div class="table-empty muted">Loading preview...</div>` : ""}
-        ${!preview.loading ? renderValidationErrors(preview.errors) : ""}
-        ${!preview.loading
-          ? `
-            <div class="preview-grid">
-              <div class="preview-panel">
-                <div class="section-title">Env file</div>
-                <pre class="log-box compact">${escapeHtml(preview.env_file_content || "# empty")}</pre>
-              </div>
-              <div class="preview-panel">
-                <div class="section-title">Override</div>
-                <pre class="log-box compact">${escapeHtml(preview.override_content || "# override preview unavailable")}</pre>
-              </div>
-            </div>
-          `
-          : ""}
-      </section>
-      <section class="card page-card">
-        <div class="section-title">Environment variables</div>
-        <form onsubmit="saveEnvVar(event, '${escapeHtml(service.name)}', '${environment}')" class="inline-form">
-          <input class="input mono" name="key" placeholder="KEY" required>
-          <input class="input mono" name="value" placeholder="value" required>
-          <button class="btn primary" type="submit">${icon("plus")} Set</button>
+    <div class="inline-error candidate-box">
+      <div class="error-title">Deploy candidate</div>
+      <div class="error-list">
+        <div>ref: <span class="mono">${escapeHtml(project.candidate_ref)}</span></div>
+        <div>commit: <span class="mono">${escapeHtml(shortCommit(project.candidate_commit))}</span></div>
+        <div>event: <span class="mono">#${escapeHtml(project.candidate_event_id)}</span></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderProjectConfig(project) {
+  const components = project.components || [];
+  const endpoints = project.endpoints || [];
+  const dependencies = project.dependencies || [];
+  const envEntries = Object.entries(project.env || {});
+  return `
+    <div class="config-grid">
+      <div class="preview-panel">
+        <div class="section-title">Components</div>
+        ${components.length ? components.map((item) => `<div class="fact compact"><span class="fact-label">${escapeHtml(item.name)}</span><span class="fact-value mono">${escapeHtml(item.mode)} · ${escapeHtml(item.compose_service || item.image || item.build_context || "-")}</span></div>`).join("") : `<div class="muted">No components.</div>`}
+        <form class="inline-form top-gap" onsubmit="addComponent(event, ${js(project.environment)}, ${js(project.name)})">
+          <input class="input" name="name" placeholder="name" required>
+          <select class="select" name="mode"><option value="compose">compose</option><option value="build">build</option><option value="image">image</option></select>
+          <input class="input" name="target" placeholder="compose service / build context / image" required>
+          <input class="input" name="port" placeholder="port">
+          <button class="btn secondary" type="submit">${icon("plus")} Add</button>
         </form>
-        <div class="table">
-          <div class="table-row table-head env-table-head">
-            <div>Key</div>
-            <div>Value</div>
-            <div></div>
-          </div>
-          ${envPairs.length
-            ? envPairs.map(([key, value]) => `
-              <div class="table-row env-table-row">
-                <div class="mono">${escapeHtml(key)}</div>
-                <div class="mono value-wrap">${escapeHtml(value)}</div>
-                <button class="btn ghost" onclick="unsetEnvVar('${escapeHtml(service.name)}', '${environment}', '${escapeHtml(key)}')">unset</button>
-              </div>
-            `).join("")
-            : `<div class="table-empty muted">No variables configured for ${escapeHtml(service.name)}/${escapeHtml(environment)}.</div>`}
-        </div>
-      </section>
-      <section class="card page-card">
-        <div class="section-title">Recent jobs</div>
-        <div class="table">
-          <div class="table-row table-head runtime-jobs-head">
-            <div>Action</div>
-            <div>Status</div>
-            <div>Ref</div>
-            <div>Finished</div>
-            <div></div>
-          </div>
-          ${jobs.length
-            ? jobs.slice(0, 10).map((job) => `
-              <div class="table-row runtime-jobs-row">
-                <div class="mono">${escapeHtml(job.action)}</div>
-                <div>${jobBadge(job.status)}</div>
-                <div class="mono">${escapeHtml(job.ref || job.version || "-")}</div>
-                <div class="subtle">${escapeHtml(formatTime(job.finished_at || job.started_at || job.created_at))}</div>
-                <div><button class="btn ghost" onclick="openJobDrawer(${job.id})">Output</button></div>
-              </div>
-            `).join("")
-            : `<div class="table-empty muted">No jobs yet for ${escapeHtml(service.name)}/${escapeHtml(environment)}.</div>`}
-        </div>
-      </section>
+      </div>
+      <div class="preview-panel">
+        <div class="section-title">Endpoints</div>
+        ${endpoints.length ? endpoints.map((item) => `<div class="fact compact"><span class="fact-label">${escapeHtml(item.name)}</span><span class="fact-value mono">${escapeHtml(item.public_url || item.subdomain || item.host || "-")}</span></div>`).join("") : `<div class="muted">No endpoints.</div>`}
+        <form class="inline-form top-gap" onsubmit="addEndpoint(event, ${js(project.environment)}, ${js(project.name)})">
+          <input class="input" name="name" placeholder="name" required>
+          <input class="input" name="component" placeholder="component" required>
+          <input class="input" name="subdomain" placeholder="subdomain" required>
+          <input class="input" name="port" placeholder="port" required>
+          <select class="select" name="auth"><option value="none">none</option><option value="sso">sso</option></select>
+          <button class="btn secondary" type="submit">${icon("plus")} Add</button>
+        </form>
+      </div>
+      <div class="preview-panel">
+        <div class="section-title">Environment</div>
+        ${envEntries.length ? envEntries.map(([key, value]) => `<div class="fact compact"><span class="fact-label mono">${escapeHtml(key)}</span><span class="fact-value mono">${escapeHtml(value)}</span></div>`).join("") : `<div class="muted">No env vars.</div>`}
+        <form class="inline-form top-gap" onsubmit="setProjectEnv(event, ${js(project.environment)}, ${js(project.name)})">
+          <input class="input" name="key" placeholder="KEY" required>
+          <input class="input" name="value" placeholder="value">
+          <button class="btn secondary" type="submit">Set</button>
+        </form>
+      </div>
+      <div class="preview-panel">
+        <div class="section-title">Dependencies</div>
+        ${dependencies.length ? dependencies.map((item) => `<div class="fact compact"><span class="fact-label">${escapeHtml(item.name)}</span><span class="fact-value mono">${escapeHtml(item.type)} · ${escapeHtml(item.target)}</span></div>`).join("") : `<div class="muted">No dependencies.</div>`}
+        <form class="inline-form top-gap" onsubmit="addDependency(event, ${js(project.environment)}, ${js(project.name)})">
+          <input class="input" name="name" placeholder="name" required>
+          <input class="input" name="type" placeholder="type" required>
+          <input class="input" name="target" placeholder="target" required>
+          <input class="input" name="output" placeholder="KEY=value">
+          <button class="btn secondary" type="submit">${icon("plus")} Add</button>
+        </form>
+      </div>
     </div>
   `;
 }
 
 function renderJobsView() {
-  const environmentNames = allEnvironmentNames();
-  const filtered = state.jobs.filter((job) => {
-    if (!matchesQuery([job.service, job.environment, job.action, job.ref, job.version, job.status], state.jobsFilter.query)) return false;
-    if (state.jobsFilter.service && job.service !== state.jobsFilter.service) return false;
-    if (state.jobsFilter.environment && job.environment !== state.jobsFilter.environment) return false;
-    if (state.jobsFilter.status && job.status !== state.jobsFilter.status) return false;
-    return true;
-  });
   return `
-    <div class="toolbar">
-      <div>
-        <div class="headline">Job activity</div>
-        <div class="muted">Recent deploy, restart, stop and down operations across all runtime targets.</div>
-      </div>
-    </div>
-    <div class="filter-bar card">
-      <div class="field grow">
-        <label>Search</label>
-        <input class="input" value="${escapeHtml(state.jobsFilter.query)}" placeholder="service, action, ref, status" oninput="setJobsFilter('query', this.value)">
-      </div>
-      <div class="field grow">
-        <label>Service</label>
-        <select class="select" onchange="setJobsFilter('service', this.value)">
-          <option value="">all services</option>
-          ${state.services.map((service) => `<option value="${escapeHtml(service.name)}" ${state.jobsFilter.service === service.name ? "selected" : ""}>${escapeHtml(service.name)}</option>`).join("")}
-        </select>
-      </div>
-      <div class="field grow">
-        <label>Environment</label>
-        <select class="select" onchange="setJobsFilter('environment', this.value)">
-          <option value="">all environments</option>
-          ${environmentNames.map((environment) => `<option value="${escapeHtml(environment)}" ${state.jobsFilter.environment === environment ? "selected" : ""}>${escapeHtml(environment)}</option>`).join("")}
-        </select>
-      </div>
-      <div class="field grow">
-        <label>Status</label>
-        <select class="select" onchange="setJobsFilter('status', this.value)">
-          <option value="">all statuses</option>
-          <option value="queued" ${state.jobsFilter.status === "queued" ? "selected" : ""}>queued</option>
-          <option value="running" ${state.jobsFilter.status === "running" ? "selected" : ""}>running</option>
-          <option value="success" ${state.jobsFilter.status === "success" ? "selected" : ""}>success</option>
-          <option value="failed" ${state.jobsFilter.status === "failed" ? "selected" : ""}>failed</option>
-        </select>
-      </div>
-    </div>
-    ${filtered.length
-      ? `
-        <div class="table">
-          <div class="table-row table-head jobs-table-head">
-            <div>Service</div>
-            <div>Action</div>
-            <div>Status</div>
-            <div>Target</div>
-            <div>Ref</div>
-            <div>Finished</div>
-            <div></div>
-          </div>
-          ${filtered.map(renderGlobalJobRow).join("")}
-        </div>
-      `
-      : renderFilterEmptyState("No jobs match the current filters", "Try another search string or reset the job filters.", "clearJobsFilter")}
+    <section class="card page-card">
+      <div class="page-header"><div><div class="headline-small">Jobs</div><div class="muted">Runtime job history and output.</div></div></div>
+      ${renderJobsTable(state.jobs)}
+    </section>
   `;
 }
 
-function renderGlobalJobRow(job) {
+function renderJobsTable(jobs) {
+  if (!jobs.length) return renderEmpty("No jobs yet");
   return `
-    <div class="table-row jobs-table-row">
-      <div class="mono">${escapeHtml(job.service)}</div>
-      <div class="mono">${escapeHtml(job.action)}</div>
-      <div>${jobBadge(job.status)}</div>
-      <div class="mono">${escapeHtml(job.environment)}</div>
-      <div class="mono">${escapeHtml(job.ref || job.version || "-")}</div>
-      <div class="subtle">${escapeHtml(formatTime(job.finished_at || job.started_at || job.created_at))}</div>
-      <div><button class="btn ghost" onclick="openJobDrawer(${job.id})">Output</button></div>
+    <div class="table table-wide">
+      <div class="table-row table-head services-table-head"><div>ID</div><div>Project</div><div>Action</div><div>Status</div><div>Ref</div><div>Created</div><div>Output</div></div>
+      ${jobs.map((job) => `
+        <div class="table-row services-table-row">
+          <div class="mono">#${job.id}</div>
+          <div class="mono">${escapeHtml(job.environment)}/${escapeHtml(job.project)}</div>
+          <div>${escapeHtml(job.action)}</div>
+          <div>${badge(job.status, job.status)}</div>
+          <div class="mono">${escapeHtml(job.ref || job.version || "-")}</div>
+          <div>${escapeHtml(formatTime(job.created_at))}</div>
+          <div><button class="btn ghost" onclick="openJob(${job.id})">Output</button></div>
+        </div>
+      `).join("")}
     </div>
   `;
 }
 
-function renderJobDrawer() {
-  const job = state.jobDrawer;
+function renderWebhooksView() {
   return `
-    <div class="overlay-backdrop" onclick="closeJobDrawer()"></div>
-    <aside class="drawer drawer-wide">
-      <div class="drawer-header">
-        <div class="row">
-          <div>
-            <div class="drawer-title">Job #${escapeHtml(job.id)}</div>
-            <div class="muted">${escapeHtml(job.service)}/${escapeHtml(job.environment)} · ${escapeHtml(job.action)}</div>
-          </div>
-          <div class="spacer"></div>
-          <button class="btn secondary" onclick="reloadJobDrawer()">Reload</button>
-          <button class="btn ghost" onclick="closeJobDrawer()">${icon("close")}</button>
+    <section class="card page-card">
+      <div class="page-header">
+        <div>
+          <div class="headline-small">Webhook events</div>
+          <div class="muted">GitHub push events, matched projects, scheduled deploys, and gated candidates.</div>
         </div>
       </div>
-      <div class="drawer-body">
-        <div class="section">
-          <div class="row wrap">
-            ${jobBadge(job.status)}
-            <span class="badge mono">${escapeHtml(job.ref || job.version || "-")}</span>
-            ${job.deployment_id ? `<span class="badge mono">deploy #${escapeHtml(job.deployment_id)}</span>` : ""}
-          </div>
+      ${state.webhookEvents.length ? `
+        <div class="table table-wide">
+          <div class="table-row table-head services-table-head"><div>ID</div><div>Event</div><div>Ref</div><div>Action</div><div>Projects</div><div>Created</div></div>
+          ${state.webhookEvents.map((event) => `
+            <div class="table-row services-table-row">
+              <div class="mono">#${event.id}</div>
+              <div>${escapeHtml(event.provider)} / ${escapeHtml(event.event_type)}</div>
+              <div class="mono">${escapeHtml(event.ref_name || "-")} <span class="subtle">${escapeHtml(shortCommit(event.commit_hash))}</span></div>
+              <div>${badge(event.status === "accepted" ? "success" : "", event.action)}</div>
+              <div class="mono">${escapeHtml((event.matched_projects || []).join(", ") || "-")}</div>
+              <div>${escapeHtml(formatTime(event.created_at))}</div>
+            </div>
+          `).join("")}
         </div>
-        <div class="section">
-          <div class="section-title">CLI Output</div>
-          ${job.log_truncated ? `<div class="inline-error">Output is truncated. Showing the most recent part.</div>` : ""}
-          <pre class="log-box">${escapeHtml(job.log || "No job output yet.")}</pre>
-        </div>
-      </div>
-    </aside>
+      ` : renderEmpty("No webhook events yet")}
+    </section>
   `;
 }
 
-function renderMissing(title) {
-  return `<div class="empty"><div style="font-weight:800">${escapeHtml(title)}</div></div>`;
-}
-
-function renderEmpty() {
+function renderAddProjectPanel() {
+  const environmentOptions = state.environments.map((env) => `<option value="${escapeHtml(env.name)}" ${state.addProject.environment === env.name ? "selected" : ""}>${escapeHtml(env.name)}</option>`).join("");
   return `
-    <div class="empty">
-      <div class="service-icon" style="background:var(--primary)">P</div>
-      <div style="font-weight:800;font-size:18px">No services yet</div>
-      <div>Add a git-backed service or a local service for debugging.</div>
-      <button class="btn primary" onclick="openAddService()">${icon("plus")} Add first service</button>
-    </div>
-  `;
-}
-
-function renderLogsDrawer() {
-  const drawer = state.logsDrawer;
-  return `
-    <div class="overlay-backdrop" onclick="closeLogsDrawer()"></div>
-    <aside class="drawer drawer-wide">
-      <div class="drawer-header">
-        <div class="row">
-          <div>
-            <div class="drawer-title">Logs: ${escapeHtml(drawer.service)}/${escapeHtml(drawer.environment)}</div>
-            <div class="muted">Runtime logs and compose status for one target.</div>
-          </div>
-          <div class="spacer"></div>
-          <button class="btn secondary" onclick="reloadLogsDrawer()">${icon("refresh")} Reload</button>
-          <button class="btn ghost" onclick="closeLogsDrawer()">${icon("close")}</button>
-        </div>
-      </div>
-      <div class="drawer-body">
-        <div class="section">
-          <div class="section-title">Status</div>
-          <pre class="log-box compact">${escapeHtml(drawer.statusText || (drawer.loading ? "Loading status..." : "No status loaded."))}</pre>
-        </div>
-        <div class="section">
-          <div class="section-title">Logs</div>
-          <pre class="log-box">${escapeHtml(drawer.log || (drawer.loading ? "Loading logs..." : "No log output yet."))}</pre>
-        </div>
-      </div>
-    </aside>
-  `;
-}
-
-function renderHistoryDrawer() {
-  const drawer = state.historyDrawer;
-  return `
-    <div class="overlay-backdrop" onclick="closeHistoryDrawer()"></div>
-    <aside class="drawer drawer-wide">
-      <div class="drawer-header">
-        <div class="row">
-          <div>
-            <div class="drawer-title">History: ${escapeHtml(drawer.service)}/${escapeHtml(drawer.environment)}</div>
-            <div class="muted">Deployment history for one runtime target.</div>
-          </div>
-          <div class="spacer"></div>
-          <button class="btn secondary" onclick="reloadHistoryDrawer()">${icon("refresh")} Reload</button>
-          <button class="btn ghost" onclick="closeHistoryDrawer()">${icon("close")}</button>
-        </div>
-      </div>
-      <div class="drawer-body">
-        <div class="table">
-          <div class="table-row table-head history-table-head">
-            <div>ID</div>
-            <div>Action</div>
-            <div>Status</div>
-            <div>Version</div>
-            <div>Finished</div>
-          </div>
-          ${drawer.loading
-            ? `<div class="table-empty muted">Loading history...</div>`
-            : drawer.deployments.length
-              ? drawer.deployments.map(renderHistoryRow).join("")
-              : `<div class="table-empty muted">No deployments for ${escapeHtml(drawer.service)}/${escapeHtml(drawer.environment)}.</div>`}
-        </div>
-      </div>
-    </aside>
-  `;
-}
-
-function renderHistoryRow(record) {
-  return `
-    <div class="table-row history-table-row">
-      <div class="mono">#${escapeHtml(record.id)}</div>
-      <div class="mono">${escapeHtml(record.action)}</div>
-      <div>${jobBadge(record.status)}</div>
-      <div class="mono">${escapeHtml(record.version || "-")}</div>
-      <div class="subtle">${escapeHtml(formatTime(record.finished_at || record.started_at))}</div>
-    </div>
-  `;
-}
-
-function renderAddPanel() {
-  return `
-    <div class="overlay-backdrop" onclick="closeAddService()"></div>
+    <div class="drawer-backdrop" onclick="closeAddProject()"></div>
     <aside class="drawer">
-      <div class="drawer-header">
-        <div class="row">
-          <div>
-            <div class="drawer-title">Add service</div>
-            <div class="muted">Register a git source or a local debug project.</div>
-          </div>
-          <div class="spacer"></div>
-          <button class="btn ghost" onclick="closeAddService()">${icon("close")}</button>
-        </div>
+      <div class="drawer-head">
+        <div><div class="section-title">Add project</div><div class="muted">Create a project inside one environment.</div></div>
+        <button class="btn ghost" onclick="closeAddProject()">${icon("close")}</button>
       </div>
-      <div class="drawer-body">
-        <form onsubmit="createService(event)">
-          <div class="field"><label>Name</label><input class="input mono" name="name" placeholder="my-service" required></div>
-          <div class="field">
-            <label>Source type</label>
-            <select class="select" name="source_type" onchange="setAddSourceType(this.value)">
-              <option value="git" ${state.addSourceType === "git" ? "selected" : ""}>git</option>
-              <option value="local" ${state.addSourceType === "local" ? "selected" : ""}>local</option>
-            </select>
-          </div>
-          ${state.addSourceType === "git"
-            ? `
-              <div class="field"><label>Git URL</label><input class="input mono" name="git_url" placeholder="git@example.com:me/app.git" required></div>
-              <div class="field"><label>Default branch</label><input class="input mono" name="default_branch" placeholder="main"></div>
-            `
-            : `
-              <div class="field"><label>Local path</label><input class="input mono" name="path" placeholder="/tmp/paas-test-app" required></div>
-            `}
-          <div class="field">
-            <label>Attach to environment</label>
-            <select class="select" name="attach_environment">
-              <option value="">do not attach yet</option>
-              ${state.environments.map((environment) => `
-                <option value="${escapeHtml(environment.name)}" ${state.currentView.name === "environment" && state.currentView.environment === environment.name ? "selected" : ""}>${escapeHtml(environment.name)}</option>
-              `).join("")}
-            </select>
-          </div>
-          <div class="row actions-end">
-            <button type="button" class="btn ghost" onclick="closeAddService()">Cancel</button>
-            <button class="btn primary" type="submit">${icon("plus")} Add service</button>
-          </div>
-        </form>
-      </div>
+      <form class="form-stack" onsubmit="submitAddProject(event)">
+        <div class="field"><label>Environment</label><select class="select" name="environment" required>${environmentOptions}</select></div>
+        <div class="field"><label>Name</label><input class="input" name="name" placeholder="tasktrack" required></div>
+        <div class="field"><label>Source type</label><select class="select" name="source_type" onchange="state.addProject.sourceType=this.value;render()"><option value="git">git</option><option value="local">local</option></select></div>
+        <div class="field"><label>Git URL or local path</label><input class="input mono" name="source" placeholder="git@github.com:org/repo.git or /srv/project" required></div>
+        <div class="field"><label>Default ref</label><input class="input mono" name="default_ref" placeholder="main/dev/tag"></div>
+        <div class="field"><label>Compose files</label><input class="input mono" name="compose_files" value="docker-compose.yml" placeholder="comma separated; empty = generated"></div>
+        <div class="field"><label>Deploy mode</label><select class="select" name="deploy_mode"><option value="manual">manual</option><option value="webhook_auto">webhook_auto</option><option value="webhook_gated">webhook_gated</option></select></div>
+        <div class="field"><label>Webhook source</label><select class="select" name="deploy_source"><option value="">none</option><option value="branch">branch</option><option value="tag">tag</option></select></div>
+        <div class="field"><label>Webhook pattern</label><input class="input mono" name="deploy_pattern" placeholder="dev or ^v[0-9]+$"></div>
+        <div class="field"><label>Pattern type</label><select class="select" name="deploy_pattern_type"><option value="">none</option><option value="exact">exact</option><option value="regex">regex</option></select></div>
+        <button class="btn primary" type="submit">${icon("plus")} Add project</button>
+      </form>
     </aside>
   `;
 }
 
 function renderDeployModal() {
-  const modal = state.deployModal;
-  const service = serviceByName(modal.service);
-  const preview = runtimePreview(modal.service, modal.environment);
   return `
-    <div class="overlay-backdrop modal-backdrop" onclick="closeDeployModal()"></div>
+    <div class="modal-backdrop" onclick="closeDeploy()"></div>
     <div class="modal">
-      <div class="modal-header">
-        <div>
-          <div class="drawer-title">Deploy ${escapeHtml(modal.service)}/${escapeHtml(modal.environment)}</div>
-          <div class="muted">The runtime target is fixed. Choose only the git ref to deploy.</div>
-        </div>
-        <button class="btn ghost" onclick="closeDeployModal()">${icon("close")}</button>
+      <div class="modal-head">
+        <div><div class="section-title">Deploy ${escapeHtml(state.deployModal.environment)}/${escapeHtml(state.deployModal.project)}</div><div class="muted">Checkout ref is optional; project default ref is used when empty.</div></div>
+        <button class="btn ghost" onclick="closeDeploy()">${icon("close")}</button>
       </div>
-      <form class="modal-body" onsubmit="submitDeploy(event)">
-        <div class="field">
-          <label>Ref / branch / tag / commit</label>
-          <input class="input mono" name="ref" value="${escapeHtml(modal.ref)}" list="deploy-refs" required>
-          <datalist id="deploy-refs">
-            ${(modal.refs || []).map((item) => `<option value="${escapeHtml(item.name)}"></option>`).join("")}
-          </datalist>
-        </div>
-        <div class="field">
-          <label>Source status</label>
-          <input class="input" value="${escapeHtml(service?.source_status?.available ? "source fetched" : "source unavailable")}" disabled>
-        </div>
-        <div class="field">
-          <label>Runtime validation</label>
-          <div class="row wrap">
-            ${renderPreviewSummary(modal.service, modal.environment)}
-          </div>
-          <div class="muted top-gap">Preview reflects the current managed checkout for this runtime target.</div>
-        </div>
-        ${preview.loading ? `<div class="muted">Checking current configuration...</div>` : renderValidationErrors(preview.errors)}
-        ${modal.error ? `<div class="inline-error">${escapeHtml(modal.error)}</div>` : ""}
-        <div class="row actions-end">
-          <button type="button" class="btn ghost" onclick="closeDeployModal()">Cancel</button>
-          <button class="btn primary" type="submit">${icon("play")} Deploy</button>
-        </div>
+      <form class="form-stack" onsubmit="submitDeploy(event)">
+        <div class="field"><label>Ref</label><input class="input mono" name="ref" placeholder="branch, tag, commit"></div>
+        <label class="check-line"><input type="checkbox" name="dry_run"> Dry run</label>
+        <button class="btn primary" type="submit">${icon("play")} Deploy</button>
       </form>
     </div>
   `;
 }
 
-function refreshData() {
-  loadAll()
-    .then(() => setToast("Data refreshed"))
-    .catch((error) => setToast(error.message));
+function renderLogsDrawer() {
+  return `
+    <div class="drawer-backdrop" onclick="closeLogs()"></div>
+    <aside class="drawer wide-drawer">
+      <div class="drawer-head">
+        <div><div class="section-title">Logs ${escapeHtml(state.logsDrawer.environment)}/${escapeHtml(state.logsDrawer.project)}</div></div>
+        <button class="btn ghost" onclick="closeLogs()">${icon("close")}</button>
+      </div>
+      <pre class="log-box">${escapeHtml(state.logsDrawer.log || "Loading...")}</pre>
+    </aside>
+  `;
+}
+
+function renderJobDrawer() {
+  return `
+    <div class="drawer-backdrop" onclick="closeJob()"></div>
+    <aside class="drawer wide-drawer">
+      <div class="drawer-head">
+        <div><div class="section-title">Job #${state.jobDrawer.id}</div><div class="muted">${escapeHtml(state.jobDrawer.environment)}/${escapeHtml(state.jobDrawer.project)} · ${escapeHtml(state.jobDrawer.action)}</div></div>
+        <button class="btn ghost" onclick="closeJob()">${icon("close")}</button>
+      </div>
+      <pre class="log-box">${escapeHtml(state.jobDrawer.log || "")}</pre>
+    </aside>
+  `;
+}
+
+function renderEmpty(message = "Nothing here yet") {
+  return `<div class="empty compact-empty"><div style="font-weight:800">${escapeHtml(message)}</div></div>`;
+}
+
+function renderError(message) {
+  return `<div class="inline-error banner-error"><div class="error-title">Error</div><div class="error-list"><div>${escapeHtml(message)}</div></div></div>`;
+}
+
+function openDashboard() {
+  state.currentView = { name: "dashboard" };
+  render();
+}
+
+function openEnvironment(environment) {
+  state.currentView = { name: "environment", environment };
+  render();
+}
+
+async function openProject(environment, project) {
+  state.currentView = { name: "project", environment, project };
+  await refreshProject(environment, project);
+  render();
+}
+
+function openJobs() {
+  state.currentView = { name: "jobs" };
+  render();
+}
+
+function openWebhooks() {
+  state.currentView = { name: "webhooks" };
+  render();
+}
+
+function openAddProject(environment = "") {
+  state.addProject = { environment: environment || state.environments[0]?.name || "", sourceType: "git" };
+  render();
+}
+
+function closeAddProject() {
+  state.addProject = null;
+  render();
+}
+
+async function submitAddProject(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const environment = form.get("environment");
+  const sourceType = form.get("source_type");
+  const source = String(form.get("source") || "").trim();
+  const composeFiles = String(form.get("compose_files") || "").split(",").map((item) => item.trim()).filter(Boolean);
+  const payload = {
+    name: String(form.get("name") || "").trim(),
+    source_type: sourceType,
+    default_ref: String(form.get("default_ref") || "").trim() || null,
+    compose_files: composeFiles,
+    deploy_mode: form.get("deploy_mode"),
+    deploy_source: String(form.get("deploy_source") || "").trim() || null,
+    deploy_pattern: String(form.get("deploy_pattern") || "").trim() || null,
+    deploy_pattern_type: String(form.get("deploy_pattern_type") || "").trim() || null,
+  };
+  if (sourceType === "git") payload.git_url = source;
+  else payload.path = source;
+  try {
+    await api(`/api/environments/${encodeURIComponent(environment)}/projects`, { method: "POST", body: JSON.stringify(payload) });
+    state.addProject = null;
+    setToast("Project added");
+    await loadAll();
+  } catch (error) {
+    setToast(error.message);
+  }
+}
+
+function openDeploy(environment, project) {
+  state.deployModal = { environment, project };
+  render();
+}
+
+function closeDeploy() {
+  state.deployModal = null;
+  render();
+}
+
+async function submitDeploy(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const { environment, project } = state.deployModal;
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/deploy`, {
+    method: "POST",
+    body: JSON.stringify({
+      ref: String(form.get("ref") || "").trim() || null,
+      dry_run: Boolean(form.get("dry_run")),
+    }),
+  });
+  state.deployModal = null;
+  setToast("Deploy job scheduled");
+  await loadAll();
+}
+
+async function deployCandidate(environment, project) {
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/deploy-candidate`, {
+    method: "POST",
+    body: JSON.stringify({ dry_run: false }),
+  });
+  setToast("Candidate deploy scheduled");
+  await loadAll();
+}
+
+async function runtimeAction(environment, project, action) {
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/${action}`, {
+    method: "POST",
+    body: JSON.stringify({ dry_run: false }),
+  });
+  setToast(`${action} job scheduled`);
+  await loadAll();
+}
+
+async function openLogs(environment, project) {
+  state.logsDrawer = { environment, project, log: "Loading..." };
+  render();
+  try {
+    const response = await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/logs?tail=300`);
+    state.logsDrawer = { environment, project, log: response.log || "" };
+  } catch (error) {
+    state.logsDrawer = { environment, project, log: error.message };
+  }
+  render();
+}
+
+function closeLogs() {
+  state.logsDrawer = null;
+  render();
+}
+
+async function openJob(id) {
+  state.jobDrawer = await api(`/api/jobs/${id}`);
+  render();
+}
+
+function closeJob() {
+  state.jobDrawer = null;
+  render();
+}
+
+async function addComponent(event, environment, project) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const mode = form.get("mode");
+  const target = String(form.get("target") || "").trim();
+  const payload = {
+    name: String(form.get("name") || "").trim(),
+    mode,
+    port: Number(form.get("port")) || null,
+  };
+  if (mode === "compose") payload.compose_service = target;
+  if (mode === "build") payload.build_context = target;
+  if (mode === "image") payload.image = target;
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/components`, { method: "POST", body: JSON.stringify(payload) });
+  await refreshProject(environment, project);
+  render();
+}
+
+async function addEndpoint(event, environment, project) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const payload = {
+    name: String(form.get("name") || "").trim(),
+    component: String(form.get("component") || "").trim(),
+    subdomain: String(form.get("subdomain") || "").trim(),
+    port: Number(form.get("port")),
+    auth: form.get("auth"),
+  };
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/endpoints`, { method: "POST", body: JSON.stringify(payload) });
+  await refreshProject(environment, project);
+  render();
+}
+
+async function addDependency(event, environment, project) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const output = String(form.get("output") || "").trim();
+  const outputs = {};
+  if (output.includes("=")) {
+    const [key, ...parts] = output.split("=");
+    outputs[key] = parts.join("=");
+  }
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/dependencies`, {
+    method: "POST",
+    body: JSON.stringify({
+      name: String(form.get("name") || "").trim(),
+      type: String(form.get("type") || "").trim(),
+      target: String(form.get("target") || "").trim(),
+      outputs,
+    }),
+  });
+  await refreshProject(environment, project);
+  render();
+}
+
+async function setProjectEnv(event, environment, project) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/env`, {
+    method: "POST",
+    body: JSON.stringify({
+      key: String(form.get("key") || "").trim(),
+      value: String(form.get("value") || ""),
+    }),
+  });
+  await refreshProject(environment, project);
+  render();
+}
+
+async function refreshProject(environment, project) {
+  const detail = await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}`);
+  const index = state.projects.findIndex((item) => item.environment === environment && item.name === project);
+  if (index >= 0) state.projects[index] = detail;
+  else state.projects.push(detail);
+}
+
+function setFilter(key, value) {
+  state.filters[key] = value;
+  render();
+}
+
+async function refreshData() {
+  await loadAll();
+  setToast("Refreshed");
 }
 
 function toggleTheme() {
@@ -1407,443 +919,4 @@ function toggleTheme() {
   render();
 }
 
-function showServicesPage() {
-  state.currentView = { name: "environments" };
-  state.actionMenu = null;
-  render();
-}
-
-function showJobsPage() {
-  state.currentView = { name: "jobs" };
-  state.actionMenu = null;
-  render();
-}
-
-function toggleEnvironmentTree(environment) {
-  const key = `env:${environment}`;
-  state.expandedServices[key] = !state.expandedServices[key];
-  render();
-}
-
-function toggleServiceTree(service) {
-  state.expandedServices[service] = !state.expandedServices[service];
-  render();
-}
-
-function openEnvironmentPage(environment) {
-  state.expandedServices[`env:${environment}`] = true;
-  state.currentView = { name: "environment", environment };
-  state.actionMenu = null;
-  render();
-}
-
-function openServicePage(service) {
-  state.expandedServices[service] = true;
-  state.currentView = { name: "service", service };
-  state.actionMenu = null;
-  render();
-}
-
-function openRuntimePage(service, environment) {
-  state.expandedServices[`env:${environment}`] = true;
-  state.currentView = { name: "runtime", service, environment };
-  state.actionMenu = null;
-  render();
-  loadRuntimePreview(service, environment, false);
-}
-
-function setJobsFilter(key, value) {
-  state.jobsFilter[key] = value;
-  persistJobsFilter();
-  render();
-}
-
-function setServicesFilter(key, value) {
-  state.servicesFilter[key] = value;
-  persistServicesFilter();
-  render();
-}
-
-async function loadRuntimePreview(service, environment, force = false) {
-  const key = runtimeKey(service, environment);
-  const current = state.runtimePreview[key];
-  if (!force && current && !current.loading) {
-    return;
-  }
-  state.runtimePreview[key] = {
-    ...(current || {}),
-    loading: true,
-    errors: current?.errors || [],
-  };
-  render();
-  try {
-    const preview = await api(`/api/services/${service}/preview?environment=${environment}`);
-    state.runtimePreview[key] = {
-      ...preview,
-      loading: false,
-    };
-    render();
-  } catch (error) {
-    state.runtimePreview[key] = {
-      loading: false,
-      valid: false,
-      errors: [{ scope: "api", message: error.message }],
-      source_path: "",
-      manifest_path: "",
-      compose_files: [],
-      public_url: null,
-      env_file_path: "",
-      env_file_content: "",
-      override_path: "",
-      override_content: "",
-    };
-    render();
-  }
-}
-
-function actionMenuPosition(trigger) {
-  const rect = trigger.getBoundingClientRect();
-  const maxLeft = window.innerWidth - ACTION_MENU_WIDTH - ACTION_MENU_VIEWPORT_PADDING;
-  const left = Math.max(ACTION_MENU_VIEWPORT_PADDING, Math.min(rect.right - ACTION_MENU_WIDTH, maxLeft));
-  const openAbove = rect.bottom + ACTION_MENU_GAP + ACTION_MENU_HEIGHT > window.innerHeight - ACTION_MENU_VIEWPORT_PADDING;
-  const top = openAbove
-    ? Math.max(ACTION_MENU_VIEWPORT_PADDING, rect.top - ACTION_MENU_HEIGHT - ACTION_MENU_GAP)
-    : Math.min(rect.bottom + ACTION_MENU_GAP, window.innerHeight - ACTION_MENU_HEIGHT - ACTION_MENU_VIEWPORT_PADDING);
-  return { top, left };
-}
-
-function closeActionMenu() {
-  if (!state.actionMenu) return;
-  state.actionMenu = null;
-  render();
-}
-
-function toggleActionMenu(event, service, environment) {
-  if (state.actionMenu && state.actionMenu.service === service && state.actionMenu.environment === environment) {
-    state.actionMenu = null;
-  } else {
-    const trigger = event?.currentTarget;
-    if (!trigger) return;
-    state.actionMenu = { service, environment, ...actionMenuPosition(trigger) };
-  }
-  render();
-}
-
-function openAddService() {
-  state.addOpen = true;
-  render();
-}
-
-function closeAddService() {
-  state.addOpen = false;
-  render();
-}
-
-function setAddSourceType(sourceType) {
-  state.addSourceType = sourceType;
-  render();
-}
-
-async function openJobDrawer(jobId) {
-  try {
-    state.jobDrawer = await api(`/api/jobs/${jobId}`);
-    render();
-  } catch (error) {
-    setToast(error.message);
-  }
-}
-
-function closeJobDrawer() {
-  state.jobDrawer = null;
-  render();
-}
-
-async function reloadJobDrawer() {
-  if (!state.jobDrawer) return;
-  await openJobDrawer(state.jobDrawer.id);
-}
-
-async function openLogsDrawer(service, environment) {
-  state.logsDrawer = {
-    service,
-    environment,
-    loading: true,
-    log: "",
-    statusText: "",
-  };
-  state.actionMenu = null;
-  render();
-  await reloadLogsDrawer();
-}
-
-function closeLogsDrawer() {
-  state.logsDrawer = null;
-  render();
-}
-
-async function reloadLogsDrawer() {
-  if (!state.logsDrawer) return;
-  const { service, environment } = state.logsDrawer;
-  state.logsDrawer = { ...state.logsDrawer, loading: true };
-  render();
-  try {
-    const [logs, status] = await Promise.all([
-      api(`/api/services/${service}/logs?environment=${environment}&tail=300`),
-      api(`/api/services/${service}/status?environment=${environment}`),
-    ]);
-    state.logsDrawer = {
-      service,
-      environment,
-      loading: false,
-      log: logs.log,
-      statusText: status.log,
-    };
-    render();
-  } catch (error) {
-    state.logsDrawer = {
-      service,
-      environment,
-      loading: false,
-      log: `Error: ${error.message}`,
-      statusText: `Error: ${error.message}`,
-    };
-    render();
-  }
-}
-
-async function openHistoryDrawer(service, environment) {
-  state.historyDrawer = {
-    service,
-    environment,
-    loading: true,
-    deployments: [],
-  };
-  state.actionMenu = null;
-  render();
-  await reloadHistoryDrawer();
-}
-
-function closeHistoryDrawer() {
-  state.historyDrawer = null;
-  render();
-}
-
-async function reloadHistoryDrawer() {
-  if (!state.historyDrawer) return;
-  const { service, environment } = state.historyDrawer;
-  state.historyDrawer = { ...state.historyDrawer, loading: true };
-  render();
-  try {
-    const history = await api(`/api/services/${service}/history?environment=${environment}&limit=50`);
-    state.historyDrawer = {
-      service,
-      environment,
-      loading: false,
-      deployments: history.deployments || [],
-    };
-    render();
-  } catch (error) {
-    state.historyDrawer = {
-      service,
-      environment,
-      loading: false,
-      deployments: [],
-    };
-    setToast(error.message);
-  }
-}
-
-async function openDeployModal(service, environment) {
-  const svc = serviceByName(service);
-  state.deployModal = {
-    service,
-    environment,
-    ref: envSummary(svc, environment).current_ref || svc?.default_branch || "main",
-    refs: [],
-    error: "",
-  };
-  state.actionMenu = null;
-  render();
-  loadRuntimePreview(service, environment, false);
-  try {
-    const response = await api(`/api/services/${service}/refs`);
-    if (!state.deployModal || state.deployModal.service !== service || state.deployModal.environment !== environment) {
-      return;
-    }
-    state.deployModal = {
-      ...state.deployModal,
-      refs: response.refs || [],
-    };
-    render();
-  } catch (error) {
-    if (!state.deployModal) return;
-    state.deployModal = {
-      ...state.deployModal,
-      error: error.message,
-    };
-    render();
-  }
-}
-
-function closeDeployModal() {
-  state.deployModal = null;
-  render();
-}
-
-async function submitDeploy(event) {
-  event.preventDefault();
-  if (!state.deployModal) return;
-  const form = new FormData(event.target);
-  const ref = String(form.get("ref") || "").trim();
-  if (!ref) {
-    setToast("Ref is required");
-    return;
-  }
-  const { service, environment } = state.deployModal;
-  closeDeployModal();
-  await scheduleJob(service, "deploy", environment, { ref });
-}
-
-async function createService(event) {
-  event.preventDefault();
-  const form = new FormData(event.target);
-  const payload = Object.fromEntries(form.entries());
-  const attachEnvironment = payload.attach_environment || "";
-  delete payload.attach_environment;
-  Object.keys(payload).forEach((key) => {
-    if (payload[key] === "") delete payload[key];
-  });
-  try {
-    await api("/api/services", { method: "POST", body: JSON.stringify(payload) });
-    if (attachEnvironment) {
-      await api(`/api/services/${payload.name}/runtime-targets`, {
-        method: "POST",
-        body: JSON.stringify({ name: attachEnvironment }),
-      });
-    }
-    state.addOpen = false;
-    await loadAll();
-    setToast(attachEnvironment ? `Service ${payload.name} added to ${attachEnvironment}` : `Service ${payload.name} added`);
-  } catch (error) {
-    setToast(error.message);
-  }
-}
-
-async function attachServiceToEnvironment(event, environment) {
-  event.preventDefault();
-  const form = new FormData(event.target);
-  const service = String(form.get("service") || "");
-  if (!service) return;
-  await attachRuntimeTarget(service, environment);
-}
-
-async function attachEnvironmentToService(event, service) {
-  event.preventDefault();
-  const form = new FormData(event.target);
-  const environment = String(form.get("environment") || "");
-  if (!environment) return;
-  await attachRuntimeTarget(service, environment);
-}
-
-async function attachRuntimeTarget(service, environment) {
-  try {
-    await api(`/api/services/${service}/runtime-targets`, {
-      method: "POST",
-      body: JSON.stringify({ name: environment }),
-    });
-    await loadAll();
-    setToast(`${service} attached to ${environment}`);
-  } catch (error) {
-    setToast(error.message);
-  }
-}
-
-async function saveEnvVar(event, service, environment) {
-  event.preventDefault();
-  const form = new FormData(event.target);
-  try {
-    await api(`/api/services/${service}/env/${environment}`, {
-      method: "POST",
-      body: JSON.stringify({ key: form.get("key"), value: form.get("value") }),
-    });
-    event.target.reset();
-    await loadAll();
-    setToast(`Environment variable saved for ${service}/${environment}`);
-  } catch (error) {
-    setToast(error.message);
-  }
-}
-
-async function unsetEnvVar(service, environment, key) {
-  try {
-    await api(`/api/services/${service}/env/${environment}/${encodeURIComponent(key)}`, { method: "DELETE" });
-    await loadAll();
-    setToast(`Environment variable removed from ${service}/${environment}`);
-  } catch (error) {
-    setToast(error.message);
-  }
-}
-
-async function runtimeAction(service, action, environment) {
-  state.actionMenu = null;
-  if (["down", "stop"].includes(action) && !confirm(`${action} ${service}/${environment}?`)) return;
-  await scheduleJob(service, action, environment);
-}
-
-async function scheduleJob(service, action, environment, extra = {}) {
-  try {
-    const job = await api(`/api/services/${service}/${action}`, {
-      method: "POST",
-      body: JSON.stringify({ environment, dry_run: false, ...extra }),
-    });
-    upsertJob(job);
-    render();
-    setToast(`${action} job #${job.id} scheduled for ${service}/${environment}`);
-    await pollJob(job.id, service, environment);
-  } catch (error) {
-    setToast(error.message);
-  }
-}
-
-async function pollJob(jobId, service, environment) {
-  for (let i = 0; i < 60; i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, i === 0 ? 250 : 1500));
-    const job = await api(`/api/jobs/${jobId}`);
-    upsertJob(job);
-    if (["success", "failed"].includes(job.status)) {
-      await loadAll();
-      if (
-        state.currentView.name !== "runtime" ||
-        state.currentView.service !== service ||
-        state.currentView.environment !== environment
-      ) {
-        await loadRuntimePreview(service, environment, true);
-      }
-      if (state.logsDrawer && state.logsDrawer.service === service && state.logsDrawer.environment === environment) {
-        await reloadLogsDrawer();
-      }
-      if (state.historyDrawer && state.historyDrawer.service === service && state.historyDrawer.environment === environment) {
-        await reloadHistoryDrawer();
-      }
-      setToast(`Job #${job.id}: ${job.status}`);
-      return;
-    }
-  }
-  setToast(`Job #${jobId} is still running`);
-}
-
-async function removeService(name) {
-  if (!confirm(`Remove ${name} from the catalog?`)) return;
-  try {
-    await api(`/api/services/${name}`, { method: "DELETE" });
-    state.currentView = { name: "services" };
-    await loadAll();
-    setToast(`Service ${name} removed`);
-  } catch (error) {
-    setToast(error.message);
-  }
-}
-
-loadAll().catch((error) => {
-  root.innerHTML = `<div class="empty" style="height:100%"><div style="font-weight:800">Failed to load deployer UI</div><div class="muted">${escapeHtml(error.message)}</div></div>`;
-});
+loadAll();

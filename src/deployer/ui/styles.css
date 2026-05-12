@@ -702,7 +702,8 @@ button:disabled {
 }
 
 .preview-meta,
-.preview-grid {
+.preview-grid,
+.config-grid {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -725,6 +726,10 @@ button:disabled {
   gap: 4px;
   min-height: 64px;
   padding: 10px 12px;
+}
+
+.fact.compact {
+  min-height: 0;
 }
 
 .fact-label {
@@ -791,8 +796,19 @@ button:disabled {
   z-index: 30;
 }
 
+.modal-backdrop,
+.drawer-backdrop {
+  background: oklch(0 0 0 / 0.30);
+  inset: 0;
+  position: fixed;
+}
+
 .modal-backdrop {
   z-index: 50;
+}
+
+.drawer-backdrop {
+  z-index: 30;
 }
 
 .drawer {
@@ -810,13 +826,19 @@ button:disabled {
   z-index: 31;
 }
 
-.drawer-wide {
+.drawer-wide,
+.wide-drawer {
   max-width: 860px;
   width: min(860px, 100vw);
 }
 
-.drawer-header {
+.drawer-header,
+.drawer-head {
+  align-items: flex-start;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
   padding: 16px 20px;
 }
 
@@ -867,16 +889,31 @@ button:disabled {
   z-index: 51;
 }
 
-.modal-header {
+.modal-header,
+.modal-head {
   align-items: flex-start;
   border-bottom: 1px solid var(--border);
   display: flex;
   gap: 12px;
+  justify-content: space-between;
   padding: 16px 18px;
 }
 
-.modal-body {
+.modal-body,
+.form-stack {
   padding: 16px 18px 18px;
+}
+
+.form-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.check-line {
+  align-items: center;
+  color: var(--fg-muted);
+  display: flex;
+  gap: 8px;
 }
 
 .log-box {
@@ -916,7 +953,8 @@ button:disabled {
   .unassigned-grid,
   .runtime-page-grid,
   .preview-meta,
-  .preview-grid {
+  .preview-grid,
+  .config-grid {
     grid-template-columns: 1fr;
   }
 }
