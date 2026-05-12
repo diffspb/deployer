@@ -70,6 +70,9 @@ GET    /api/services/{name}/history
 GET    /api/services/{name}/preview
 GET    /api/jobs
 GET    /api/jobs/{job_id}
+GET    /api/webhook-events
+POST   /api/webhooks/github
+POST   /api/environments/{environment}/projects/{project}/deploy-candidate
 POST   /api/services/{name}/deploy
 POST   /api/services/{name}/stop
 POST   /api/services/{name}/down

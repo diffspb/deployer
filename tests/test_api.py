@@ -1,4 +1,6 @@
 from pathlib import Path
+import hashlib
+import hmac
 
 from fastapi.testclient import TestClient
 
@@ -26,6 +28,17 @@ def _client(tmp_path: Path) -> TestClient:
         DeployerConfig(
             state_db=tmp_path / "state.db",
             runtime_dir=tmp_path / "runtime",
+        )
+    )
+    return TestClient(app)
+
+
+def _client_with_secret(tmp_path: Path, secret: str) -> TestClient:
+    app = create_app(
+        DeployerConfig(
+            state_db=tmp_path / "state.db",
+            runtime_dir=tmp_path / "runtime",
+            webhook_secret=secret,
         )
     )
     return TestClient(app)
@@ -299,6 +312,105 @@ services:
     assert response.json() == {"removed": True, "environment": "dev", "project": "tasktrack"}
 
 
+def test_api_github_webhook_auto_and_gated_projects(tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "docker-compose.yml").write_text("services:\n  app:\n    image: nginx:alpine\n")
+    secret = "top-secret"
+    client = _client_with_secret(tmp_path, secret)
+
+    assert client.post(
+        "/api/environments/dev/projects",
+        json={
+            "name": "tasktrack",
+            "source_type": "local",
+            "path": str(source),
+            "default_ref": "dev",
+            "deploy_mode": "webhook_auto",
+            "deploy_source": "branch",
+            "deploy_pattern": "dev",
+            "deploy_pattern_type": "exact",
+        },
+    ).status_code == 201
+    assert client.post(
+        "/api/environments/prod/projects",
+        json={
+            "name": "tasktrack",
+            "source_type": "local",
+            "path": str(source),
+            "default_ref": "main",
+            "deploy_mode": "webhook_gated",
+            "deploy_source": "tag",
+            "deploy_pattern": "^v[0-9]+$",
+            "deploy_pattern_type": "regex",
+        },
+    ).status_code == 201
+    for environment in ("dev", "prod"):
+        assert client.post(
+            f"/api/environments/{environment}/projects/tasktrack/components",
+            json={"name": "web", "mode": "compose", "compose_service": "app", "port": 8080},
+        ).status_code == 201
+        assert client.post(
+            f"/api/environments/{environment}/projects/tasktrack/endpoints",
+            json={"name": "web", "component": "web", "port": 8080, "subdomain": "tasktrack"},
+        ).status_code == 201
+
+    push_payload = {
+        "ref": "refs/heads/dev",
+        "after": "dev123",
+        "repository": {"full_name": "org/tasktrack"},
+    }
+    response = client.post(
+        "/api/webhooks/github",
+        content=json_bytes(push_payload),
+        headers=_github_headers(secret, push_payload, event="push", delivery="delivery-dev"),
+    )
+    assert response.status_code == 202
+    assert response.json()["event"]["action"] == "scheduled"
+    assert response.json()["event"]["matched_projects"] == ["dev/tasktrack"]
+    job = client.get(f"/api/jobs/{response.json()['jobs'][0]['id']}").json()
+    assert job["action"] == "deploy"
+    assert job["ref"] == "dev"
+
+    tag_payload = {
+        "ref": "refs/tags/v1",
+        "after": "tag123",
+        "repository": {"full_name": "org/tasktrack"},
+    }
+    response = client.post(
+        "/api/webhooks/github",
+        content=json_bytes(tag_payload),
+        headers=_github_headers(secret, tag_payload, event="push", delivery="delivery-tag"),
+    )
+    assert response.status_code == 202
+    assert response.json()["event"]["action"] == "candidate"
+    assert response.json()["jobs"] == []
+    prod = client.get("/api/environments/prod/projects/tasktrack").json()
+    assert prod["candidate_ref"] == "v1"
+    assert prod["candidate_commit"] == "tag123"
+
+    response = client.post("/api/environments/prod/projects/tasktrack/deploy-candidate", json={"dry_run": True})
+    assert response.status_code == 202
+    job = client.get(f"/api/jobs/{response.json()['id']}").json()
+    assert job["status"] == "success"
+    assert job["ref"] == "v1"
+    assert client.get("/api/environments/prod/projects/tasktrack").json()["candidate_ref"] is None
+
+    events = client.get("/api/webhook-events").json()["events"]
+    assert [event["delivery_id"] for event in events[:2]] == ["delivery-tag", "delivery-dev"]
+
+
+def test_api_github_webhook_rejects_invalid_signature(tmp_path: Path):
+    client = _client_with_secret(tmp_path, "top-secret")
+    response = client.post(
+        "/api/webhooks/github",
+        content=json_bytes({"ref": "refs/heads/dev"}),
+        headers={"X-Hub-Signature-256": "sha256=broken", "X-GitHub-Event": "push"},
+    )
+
+    assert response.status_code == 401
+
+
 def test_api_validation_and_catalog_errors(tmp_path: Path):
     project = _project(tmp_path / "project")
     client = _client(tmp_path)
@@ -375,3 +487,20 @@ def test_api_parses_status_summary_payload_from_json_lines():
 
     assert summary["running"] is True
     assert summary["health"] == "healthy"
+
+
+def json_bytes(payload: dict) -> bytes:
+    import json
+
+    return json.dumps(payload, separators=(",", ":")).encode()
+
+
+def _github_headers(secret: str, payload: dict, event: str, delivery: str) -> dict:
+    body = json_bytes(payload)
+    signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return {
+        "X-Hub-Signature-256": signature,
+        "X-GitHub-Event": event,
+        "X-GitHub-Delivery": delivery,
+        "Content-Type": "application/json",
+    }

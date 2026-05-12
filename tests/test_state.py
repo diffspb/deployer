@@ -166,6 +166,48 @@ def test_state_stores_environment_scoped_projects(tmp_path: Path):
     assert [project.name for project in state.list_projects("dev")] == ["tasktrack"]
 
 
+def test_state_tracks_project_candidates_and_webhook_events(tmp_path: Path):
+    state = StateStore(tmp_path / "state.db")
+    state.add_project(
+        "prod",
+        "tasktrack",
+        "git",
+        "/srv/tasktrack",
+        source_url="git@example.com:org/tasktrack.git",
+        deploy_mode="webhook_gated",
+        deploy_source="tag",
+        deploy_pattern="^v[0-9]+$",
+        deploy_pattern_type="regex",
+    )
+
+    event_id = state.create_webhook_event(
+        "github",
+        "push",
+        "delivery-1",
+        "org/tasktrack",
+        "refs/tags/v1",
+        "tag",
+        "v1",
+        "abc123",
+        ("prod/tasktrack",),
+        "candidate",
+        "accepted",
+        {"ref": "refs/tags/v1"},
+    )
+    state.update_project_candidate("prod", "tasktrack", "v1", "abc123", event_id)
+
+    project = state.require_project("prod", "tasktrack")
+    events = state.list_webhook_events()
+    assert project.candidate_ref == "v1"
+    assert project.candidate_commit == "abc123"
+    assert project.candidate_event_id == event_id
+    assert events[0].matched_projects == ("prod/tasktrack",)
+    assert events[0].payload == {"ref": "refs/tags/v1"}
+
+    state.clear_project_candidate("prod", "tasktrack")
+    assert state.require_project("prod", "tasktrack").candidate_ref is None
+
+
 def test_state_stores_project_components_endpoints_and_dependencies(tmp_path: Path):
     state = StateStore(tmp_path / "state.db")
     state.add_project("dev", "tasktrack", "local", "/srv/tasktrack")

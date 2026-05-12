@@ -83,6 +83,9 @@ class EnvironmentProjectRecord:
     current_ref: str | None
     current_commit: str | None
     last_deployment_id: int | None
+    candidate_ref: str | None
+    candidate_commit: str | None
+    candidate_event_id: int | None
     created_at: str
     updated_at: str
 
@@ -149,6 +152,24 @@ class JobRecord:
     finished_at: str | None
     log: str
     error: str | None
+
+
+@dataclass(frozen=True)
+class WebhookEventRecord:
+    id: int
+    provider: str
+    event_type: str
+    delivery_id: str | None
+    repository: str | None
+    ref: str | None
+    ref_type: str | None
+    ref_name: str | None
+    commit_hash: str | None
+    matched_projects: tuple[str, ...]
+    action: str
+    status: str
+    payload: dict
+    created_at: str
 
 
 class StateStore:
@@ -270,6 +291,75 @@ class StateStore:
                 params,
             ).fetchall()
         return [_job_record(row) for row in rows]
+
+    def create_webhook_event(
+        self,
+        provider: str,
+        event_type: str,
+        delivery_id: str | None,
+        repository: str | None,
+        ref: str | None,
+        ref_type: str | None,
+        ref_name: str | None,
+        commit_hash: str | None,
+        matched_projects: tuple[str, ...],
+        action: str,
+        status: str,
+        payload: dict,
+    ) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO webhook_events(
+                    provider, event_type, delivery_id, repository, ref, ref_type, ref_name,
+                    commit_hash, matched_projects_json, action, status, payload_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    provider,
+                    event_type,
+                    delivery_id,
+                    repository,
+                    ref,
+                    ref_type,
+                    ref_name,
+                    commit_hash,
+                    json.dumps(list(matched_projects)),
+                    action,
+                    status,
+                    json.dumps(payload, sort_keys=True),
+                    _now(),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def get_webhook_event(self, event_id: int) -> WebhookEventRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, provider, event_type, delivery_id, repository, ref, ref_type, ref_name,
+                       commit_hash, matched_projects_json, action, status, payload_json, created_at
+                FROM webhook_events
+                WHERE id = ?
+                """,
+                (event_id,),
+            ).fetchone()
+        return _webhook_event_record(row) if row else None
+
+    def list_webhook_events(self, limit: int = 50) -> list[WebhookEventRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, provider, event_type, delivery_id, repository, ref, ref_type, ref_name,
+                       commit_hash, matched_projects_json, action, status, payload_json, created_at
+                FROM webhook_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [_webhook_event_record(row) for row in rows]
 
     def add_service(
         self,
@@ -496,7 +586,7 @@ class StateStore:
                 SELECT id, environment, name, source_type, source_url, source_path, default_ref,
                        compose_files_json, deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
                        env_vars_json, current_version, current_ref, current_commit,
-                       last_deployment_id, created_at, updated_at
+                       last_deployment_id, candidate_ref, candidate_commit, candidate_event_id, created_at, updated_at
                 FROM environment_projects
                 {where}
                 ORDER BY environment, name
@@ -512,7 +602,7 @@ class StateStore:
                 SELECT id, environment, name, source_type, source_url, source_path, default_ref,
                        compose_files_json, deploy_mode, deploy_source, deploy_pattern, deploy_pattern_type,
                        env_vars_json, current_version, current_ref, current_commit,
-                       last_deployment_id, created_at, updated_at
+                       last_deployment_id, candidate_ref, candidate_commit, candidate_event_id, created_at, updated_at
                 FROM environment_projects
                 WHERE environment = ? AND name = ?
                 """,
@@ -587,6 +677,28 @@ class StateStore:
                 """,
                 (version, ref, commit_hash, deployment_id, _now(), project.id),
             )
+
+    def update_project_candidate(
+        self,
+        environment: str,
+        name: str,
+        ref: str | None,
+        commit_hash: str | None,
+        event_id: int | None,
+    ) -> None:
+        project = self.require_project(environment, name)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE environment_projects
+                SET candidate_ref = ?, candidate_commit = ?, candidate_event_id = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (ref, commit_hash, event_id, _now(), project.id),
+            )
+
+    def clear_project_candidate(self, environment: str, name: str) -> None:
+        self.update_project_candidate(environment, name, None, None, None)
 
     def add_component(
         self,
@@ -1167,11 +1279,15 @@ class StateStore:
                     current_ref TEXT,
                     current_commit TEXT,
                     last_deployment_id INTEGER,
+                    candidate_ref TEXT,
+                    candidate_commit TEXT,
+                    candidate_event_id INTEGER,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(environment, name),
                     FOREIGN KEY(environment) REFERENCES environment_profiles(name) ON DELETE RESTRICT,
-                    FOREIGN KEY(last_deployment_id) REFERENCES deployments(id) ON DELETE SET NULL
+                    FOREIGN KEY(last_deployment_id) REFERENCES deployments(id) ON DELETE SET NULL,
+                    FOREIGN KEY(candidate_event_id) REFERENCES webhook_events(id) ON DELETE SET NULL
                 )
                 """
             )
@@ -1181,10 +1297,39 @@ class StateStore:
                 "compose_files_json",
                 "TEXT NOT NULL DEFAULT '[\"docker-compose.yml\"]'",
             )
+            _ensure_column(conn, "environment_projects", "candidate_ref", "TEXT")
+            _ensure_column(conn, "environment_projects", "candidate_commit", "TEXT")
+            _ensure_column(conn, "environment_projects", "candidate_event_id", "INTEGER")
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_environment_projects_environment_name
                 ON environment_projects(environment, name)
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS webhook_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    delivery_id TEXT,
+                    repository TEXT,
+                    ref TEXT,
+                    ref_type TEXT,
+                    ref_name TEXT,
+                    commit_hash TEXT,
+                    matched_projects_json TEXT NOT NULL DEFAULT '[]',
+                    action TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_webhook_events_created
+                ON webhook_events(id)
                 """
             )
             conn.execute(
@@ -1311,8 +1456,11 @@ def _environment_project_record(row) -> EnvironmentProjectRecord:
         current_ref=row[14],
         current_commit=row[15],
         last_deployment_id=row[16],
-        created_at=row[17],
-        updated_at=row[18],
+        candidate_ref=row[17],
+        candidate_commit=row[18],
+        candidate_event_id=row[19],
+        created_at=row[20],
+        updated_at=row[21],
     )
 
 
@@ -1362,6 +1510,25 @@ def _project_dependency_record(row) -> ProjectDependencyRecord:
         outputs=json.loads(row[5] or "{}"),
         created_at=row[6],
         updated_at=row[7],
+    )
+
+
+def _webhook_event_record(row) -> WebhookEventRecord:
+    return WebhookEventRecord(
+        id=row[0],
+        provider=row[1],
+        event_type=row[2],
+        delivery_id=row[3],
+        repository=row[4],
+        ref=row[5],
+        ref_type=row[6],
+        ref_name=row[7],
+        commit_hash=row[8],
+        matched_projects=tuple(json.loads(row[9] or "[]")),
+        action=row[10],
+        status=row[11],
+        payload=json.loads(row[12] or "{}"),
+        created_at=row[13],
     )
 
 

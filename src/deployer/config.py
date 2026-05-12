@@ -14,10 +14,12 @@ DEFAULT_STATE_DB = Path("/var/lib/deployer/state.db")
 class DeployerConfig:
     state_db: Path
     runtime_dir: Path
+    webhook_secret: str | None = None
 
 
 def load_config() -> DeployerConfig:
     return DeployerConfig(
         state_db=Path(os.getenv("DEPLOYER_STATE_DB", str(DEFAULT_STATE_DB))),
         runtime_dir=Path(os.getenv("DEPLOYER_RUNTIME_DIR", str(DEFAULT_RUNTIME_DIR))),
+        webhook_secret=os.getenv("DEPLOYER_WEBHOOK_SECRET") or None,
     )

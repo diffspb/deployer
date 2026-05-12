@@ -110,7 +110,13 @@ POST /api/environments/{environment}/projects/{project}/dependencies
 POST /api/environments/{environment}/projects/{project}/deploy
 GET  /api/environments/{environment}/projects/{project}/status
 GET  /api/environments/{environment}/projects/{project}/logs
+POST /api/webhooks/github
+GET  /api/webhook-events
 ```
+
+GitHub webhooks support `push` events. If `DEPLOYER_WEBHOOK_SECRET` is set, requests must include a valid
+`X-Hub-Signature-256` HMAC signature. `webhook_auto` projects schedule a deploy; `webhook_gated` projects store
+the matching ref/commit as a deploy candidate.
 
 Web UI:
 

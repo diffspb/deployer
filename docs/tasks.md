@@ -82,9 +82,9 @@
 - [ ] Remove old service/runtime-target API routes after UI migration.
 - [ ] Rebuild UI around environment pages and environment project pages.
 - [ ] Remove attach/detach flows from UI and API.
-- [ ] Add GitHub webhook ingestion for environment project deploy policies.
-- [ ] Implement `webhook_auto` for one configured environment project.
-- [ ] Implement `webhook_gated` candidate storage and deploy.
+- [x] Add GitHub webhook ingestion for environment project deploy policies.
+- [x] Implement `webhook_auto` for one configured environment project.
+- [x] Implement `webhook_gated` candidate storage and deploy.
 - [ ] Implement PostgreSQL dependency binding that can use one server with separate databases/users.
 
 ## Phase 2: Runtime Hardening
@@ -92,7 +92,7 @@
 - [ ] Add Docker socket proxy compose service for deployer.
 - [ ] Package deployer as a Docker service behind Traefik and oauth2-proxy.
 - [ ] Add deployment log streaming endpoint.
-- [ ] Add webhook endpoint with HMAC validation.
+- [x] Add webhook endpoint with HMAC validation.
 - [ ] Add encrypted secret storage.
 
 ## Phase 3: UI
@@ -124,13 +124,13 @@
 - [x] Add global environment profile CRUD for reusable environment definitions.
 - [x] Add per-profile `url_prefix` instead of hardcoded `prod/dev` host logic.
 - [x] Add per-profile deploy policy fields: `deploy_mode`, `deploy_source`, `deploy_pattern`, `deploy_pattern_type`.
-- [ ] Add per-target candidate fields for gated webhook deployments.
+- [x] Add per-project candidate fields for gated webhook deployments.
 - [x] Generalize CLI, API, catalog, state, tests, and UI to support any number of arbitrary runtime target names.
-- [ ] Add GitHub webhook ingestion with HMAC validation and event audit log.
-- [ ] Implement webhook rule matching for branch-based deployments.
-- [ ] Implement webhook rule matching for tag-based deployments.
-- [ ] Implement `webhook_auto` mode: matching event deploys immediately.
-- [ ] Implement `webhook_gated` mode: matching event updates candidate without deploying.
+- [x] Add GitHub webhook ingestion with HMAC validation and event audit log.
+- [x] Implement webhook rule matching for branch-based deployments.
+- [x] Implement webhook rule matching for tag-based deployments.
+- [x] Implement `webhook_auto` mode: matching event deploys immediately.
+- [x] Implement `webhook_gated` mode: matching event updates candidate without deploying.
 - [ ] Add UI for target deploy mode and trigger configuration.
 - [ ] Add UI for candidate inspection and `Deploy Candidate`.
 - [ ] Add sample target setup as an example, not as a fixed environment set:

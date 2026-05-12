@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from pathlib import Path
+import re
 from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
@@ -389,6 +392,28 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
             version=payload.version,
         )
 
+    @app.post("/api/environments/{environment}/projects/{project}/deploy-candidate", status_code=202)
+    def deploy_project_candidate(
+        environment: str,
+        project: str,
+        payload: RuntimeRequest,
+        background_tasks: BackgroundTasks,
+        context: ContextDep,
+    ) -> dict:
+        record = context.catalog.get_project(environment, project)
+        if not record.candidate_ref:
+            raise HTTPException(status_code=409, detail=f"No candidate for project: {environment}/{project}")
+        return _schedule_project_runtime_job(
+            context,
+            background_tasks,
+            environment,
+            project,
+            "deploy",
+            dry_run=payload.dry_run,
+            ref=record.candidate_ref,
+            version=record.candidate_ref,
+        )
+
     @app.post("/api/environments/{environment}/projects/{project}/stop", status_code=202)
     def stop_environment_project(
         environment: str,
@@ -502,6 +527,29 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         if job is None:
             raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}")
         return _job_payload(job, log_limit=log_limit)
+
+    @app.get("/api/webhook-events")
+    def list_webhook_events(
+        context: ContextDep,
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> dict:
+        return {"events": [_webhook_event_payload(event) for event in context.state.list_webhook_events(limit)]}
+
+    @app.post("/api/webhooks/github", status_code=202)
+    async def github_webhook(request: Request, background_tasks: BackgroundTasks, context: ContextDep) -> dict:
+        body = await request.body()
+        _verify_github_signature(context.config.webhook_secret, body, request.headers.get("X-Hub-Signature-256"))
+        try:
+            payload = json.loads(body.decode() or "{}")
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {exc}") from exc
+        return _handle_github_webhook(
+            context,
+            background_tasks,
+            request.headers.get("X-GitHub-Event", "unknown"),
+            request.headers.get("X-GitHub-Delivery"),
+            payload,
+        )
 
     @app.post("/api/services/{name}/deploy", status_code=202)
     def deploy(name: str, payload: DeployRequest, background_tasks: BackgroundTasks, context: ContextDep) -> dict:
@@ -638,6 +686,9 @@ def _project_payload(catalog: ServiceCatalog, project: EnvironmentProjectRecord)
         "current_ref": project.current_ref,
         "current_commit": project.current_commit,
         "last_deployment_id": project.last_deployment_id,
+        "candidate_ref": project.candidate_ref,
+        "candidate_commit": project.candidate_commit,
+        "candidate_event_id": project.candidate_event_id,
         "public_urls": [endpoint["public_url"] for endpoint in endpoints if endpoint["public_url"]],
         "created_at": project.created_at,
         "updated_at": project.updated_at,
@@ -713,6 +764,25 @@ def _dependency_payload(dependency: ProjectDependencyRecord) -> dict:
         "outputs": dependency.outputs,
         "created_at": dependency.created_at,
         "updated_at": dependency.updated_at,
+    }
+
+
+def _webhook_event_payload(event) -> dict:
+    return {
+        "id": event.id,
+        "provider": event.provider,
+        "event_type": event.event_type,
+        "delivery_id": event.delivery_id,
+        "repository": event.repository,
+        "ref": event.ref,
+        "ref_type": event.ref_type,
+        "ref_name": event.ref_name,
+        "commit_hash": event.commit_hash,
+        "matched_projects": list(event.matched_projects),
+        "action": event.action,
+        "status": event.status,
+        "payload": event.payload,
+        "created_at": event.created_at,
     }
 
 
@@ -1044,6 +1114,135 @@ def _schedule_project_runtime_job(
     return _job_payload(job)
 
 
+def _verify_github_signature(secret: str | None, body: bytes, signature: str | None) -> None:
+    if not secret:
+        return
+    if not signature or not signature.startswith("sha256="):
+        raise HTTPException(status_code=401, detail="Missing GitHub webhook signature")
+    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=401, detail="Invalid GitHub webhook signature")
+
+
+def _handle_github_webhook(
+    context: ApiContext,
+    background_tasks: BackgroundTasks,
+    event_type: str,
+    delivery_id: str | None,
+    payload: dict,
+) -> dict:
+    ref = payload.get("ref")
+    ref_type, ref_name = _github_ref_parts(ref)
+    commit_hash = payload.get("after") or payload.get("head_commit", {}).get("id")
+    repository = payload.get("repository", {}).get("full_name")
+
+    if event_type != "push" or not ref_type or not ref_name:
+        event_id = context.state.create_webhook_event(
+            "github",
+            event_type,
+            delivery_id,
+            repository,
+            ref,
+            ref_type,
+            ref_name,
+            commit_hash,
+            (),
+            "ignored",
+            "ignored",
+            payload,
+        )
+        return {"event": _webhook_event_payload(context.state.get_webhook_event(event_id)), "jobs": []}
+
+    matches = [
+        project for project in context.state.list_projects()
+        if _project_matches_webhook(project, payload, ref_type, ref_name)
+    ]
+    matched_names = tuple(f"{project.environment}/{project.name}" for project in matches)
+    auto_projects = [project for project in matches if project.deploy_mode == "webhook_auto"]
+    gated_projects = [project for project in matches if project.deploy_mode == "webhook_gated"]
+    action = _webhook_action(auto_projects, gated_projects)
+    status = "accepted" if matches else "ignored"
+    event_id = context.state.create_webhook_event(
+        "github",
+        event_type,
+        delivery_id,
+        repository,
+        ref,
+        ref_type,
+        ref_name,
+        commit_hash,
+        matched_names,
+        action,
+        status,
+        payload,
+    )
+
+    jobs = []
+    for project in gated_projects:
+        context.state.update_project_candidate(project.environment, project.name, ref_name, commit_hash, event_id)
+    for project in auto_projects:
+        job = _schedule_project_runtime_job(
+            context,
+            background_tasks,
+            project.environment,
+            project.name,
+            "deploy",
+            dry_run=False,
+            ref=ref_name,
+            version=ref_name,
+        )
+        jobs.append(job)
+    return {"event": _webhook_event_payload(context.state.get_webhook_event(event_id)), "jobs": jobs}
+
+
+def _github_ref_parts(ref: str | None) -> tuple[str | None, str | None]:
+    if not ref:
+        return None, None
+    if ref.startswith("refs/heads/"):
+        return "branch", ref.removeprefix("refs/heads/")
+    if ref.startswith("refs/tags/"):
+        return "tag", ref.removeprefix("refs/tags/")
+    return None, None
+
+
+def _project_matches_webhook(project, payload: dict, ref_type: str, ref_name: str) -> bool:
+    if project.deploy_mode not in {"webhook_auto", "webhook_gated"}:
+        return False
+    if project.deploy_source != ref_type:
+        return False
+    if not _project_matches_repository(project, payload):
+        return False
+    pattern = project.deploy_pattern or ""
+    if project.deploy_pattern_type == "exact":
+        return ref_name == pattern
+    if project.deploy_pattern_type == "regex":
+        return re.fullmatch(pattern, ref_name) is not None
+    return False
+
+
+def _project_matches_repository(project, payload: dict) -> bool:
+    if not project.source_url:
+        return True
+    repository = payload.get("repository") or {}
+    candidates = {
+        repository.get("clone_url"),
+        repository.get("ssh_url"),
+        repository.get("html_url"),
+        repository.get("git_url"),
+        repository.get("full_name"),
+    }
+    return project.source_url in candidates
+
+
+def _webhook_action(auto_projects: list, gated_projects: list) -> str:
+    actions = []
+    if auto_projects:
+        actions.append("scheduled")
+    if gated_projects:
+        actions.append("candidate")
+    return "+".join(actions) if actions else "ignored"
+
+
 def _run_runtime_job(config: DeployerConfig, job_id: int) -> None:
     context = ApiContext(config)
     job = context.state.get_job(job_id)
@@ -1090,7 +1289,7 @@ def _run_runtime_job(config: DeployerConfig, job_id: int) -> None:
 
 def _run_project_runtime_action(context: ApiContext, job: JobRecord):
     if job.action == "deploy":
-        return context.catalog.deploy_project(
+        result = context.catalog.deploy_project(
             job.environment,
             job.service,
             context.engine,
@@ -1098,6 +1297,10 @@ def _run_project_runtime_action(context: ApiContext, job: JobRecord):
             version=job.version,
             dry_run=job.dry_run,
         )
+        project = context.state.get_project(job.environment, job.service)
+        if result.status == "success" and project and project.candidate_ref == job.ref:
+            context.state.clear_project_candidate(job.environment, job.service)
+        return result
     if job.action == "stop":
         return context.catalog.stop_project(job.environment, job.service, context.engine, dry_run=job.dry_run)
     if job.action == "down":
