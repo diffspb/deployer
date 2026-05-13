@@ -17,6 +17,7 @@ const state = {
     environment: "",
     status: "",
   },
+  pollTimer: null,
 };
 
 const root = document.getElementById("deployer-root");
@@ -223,6 +224,31 @@ async function refreshStatuses() {
     state.runtimeStatus[projectKey(project.environment, project.name)] = status;
   });
   render();
+}
+
+async function refreshActivity() {
+  try {
+    const [jobsPayload, webhooksPayload] = await Promise.all([
+      api("/api/jobs?limit=100"),
+      api("/api/webhook-events?limit=50"),
+    ]);
+    state.jobs = jobsPayload.jobs || [];
+    state.webhookEvents = webhooksPayload.events || [];
+    if (state.currentView.name === "project") {
+      await refreshProject(state.currentView.environment, state.currentView.project);
+    }
+    render();
+  } catch (error) {
+    console.warn("Activity refresh failed", error);
+  }
+}
+
+function startPolling() {
+  if (state.pollTimer) return;
+  state.pollTimer = window.setInterval(() => {
+    refreshActivity();
+    refreshStatuses();
+  }, 5000);
 }
 
 function setToast(message) {
@@ -447,6 +473,7 @@ function renderProjectView() {
   const project = projectByName(state.currentView.environment, state.currentView.project);
   if (!project) return renderEmpty("Unknown project");
   const jobs = state.jobs.filter((job) => job.environment === project.environment && job.project === project.name);
+  const webhookEvents = state.webhookEvents.filter((event) => (event.matched_projects || []).includes(`${project.environment}/${project.name}`));
   return `
     <div class="page-stack">
       <section class="card page-card">
@@ -484,6 +511,10 @@ function renderProjectView() {
       <section class="card page-card">
         <div class="page-header"><div><div class="section-title">Recent jobs</div><div class="muted">Latest runtime actions for this project.</div></div></div>
         ${renderJobsTable(jobs.slice(0, 8))}
+      </section>
+      <section class="card page-card">
+        <div class="page-header"><div><div class="section-title">Recent webhook events</div><div class="muted">External triggers matched to this project.</div></div></div>
+        ${renderWebhookEventsTable(webhookEvents.slice(0, 5))}
       </section>
     </div>
   `;
@@ -594,22 +625,27 @@ function renderWebhooksView() {
           <div class="muted">GitHub push events, matched projects, scheduled deploys, and gated candidates.</div>
         </div>
       </div>
-      ${state.webhookEvents.length ? `
-        <div class="table table-wide">
-          <div class="table-row table-head services-table-head"><div>ID</div><div>Event</div><div>Ref</div><div>Action</div><div>Projects</div><div>Created</div></div>
-          ${state.webhookEvents.map((event) => `
-            <div class="table-row services-table-row">
-              <div class="mono">#${event.id}</div>
-              <div>${escapeHtml(event.provider)} / ${escapeHtml(event.event_type)}</div>
-              <div class="mono">${escapeHtml(event.ref_name || "-")} <span class="subtle">${escapeHtml(shortCommit(event.commit_hash))}</span></div>
-              <div>${badge(event.status === "accepted" ? "success" : "", event.action)}</div>
-              <div class="mono">${escapeHtml((event.matched_projects || []).join(", ") || "-")}</div>
-              <div>${escapeHtml(formatTime(event.created_at))}</div>
-            </div>
-          `).join("")}
-        </div>
-      ` : renderEmpty("No webhook events yet")}
+      ${renderWebhookEventsTable(state.webhookEvents)}
     </section>
+  `;
+}
+
+function renderWebhookEventsTable(events) {
+  if (!events.length) return renderEmpty("No webhook events yet");
+  return `
+    <div class="table table-wide">
+      <div class="table-row table-head services-table-head"><div>ID</div><div>Event</div><div>Ref</div><div>Action</div><div>Projects</div><div>Created</div></div>
+      ${events.map((event) => `
+        <div class="table-row services-table-row">
+          <div class="mono">#${event.id}</div>
+          <div>${escapeHtml(event.provider)} / ${escapeHtml(event.event_type)}</div>
+          <div class="mono">${escapeHtml(event.ref_name || "-")} <span class="subtle">${escapeHtml(shortCommit(event.commit_hash))}</span></div>
+          <div>${badge(event.status === "accepted" ? "success" : "", event.action)}</div>
+          <div class="mono">${escapeHtml((event.matched_projects || []).join(", ") || "-")}</div>
+          <div>${escapeHtml(formatTime(event.created_at))}</div>
+        </div>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -919,4 +955,4 @@ function toggleTheme() {
   render();
 }
 
-loadAll();
+loadAll().then(startPolling);
