@@ -114,6 +114,7 @@
 - [x] Add persistent UI filters/search and better empty/error states.
 - [x] Stop auto-creating `prod/dev` runtime targets for every new service.
 - [x] Add environment-first UI navigation and attach flow.
+- [ ] Add endpoint `health_path` field to the Web UI endpoint form.
 - [ ] Add mobile navigation for small screens.
 
 ## Runtime Targets v2
