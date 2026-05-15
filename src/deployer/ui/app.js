@@ -553,13 +553,19 @@ function renderProjectConfig(project) {
       </div>
       <div class="preview-panel">
         <div class="section-title">Endpoints</div>
-        ${endpoints.length ? endpoints.map((item) => `<div class="fact compact"><span class="fact-label">${escapeHtml(item.name)}</span><span class="fact-value mono">${escapeHtml(item.public_url || item.subdomain || item.host || "-")}</span></div>`).join("") : `<div class="muted">No endpoints.</div>`}
+        ${endpoints.length ? endpoints.map((item) => `
+          <div class="fact compact">
+            <span class="fact-label">${escapeHtml(item.name)}</span>
+            <span class="fact-value mono">${escapeHtml(item.public_url || item.subdomain || item.host || "-")}${item.healthcheck_path ? ` · health ${escapeHtml(item.healthcheck_path)}` : ""}</span>
+          </div>
+        `).join("") : `<div class="muted">No endpoints.</div>`}
         <form class="inline-form top-gap" onsubmit="addEndpoint(event, ${js(project.environment)}, ${js(project.name)})">
           <input class="input" name="name" placeholder="name" required>
           <input class="input" name="component" placeholder="component" required>
           <input class="input" name="subdomain" placeholder="subdomain" required>
           <input class="input" name="port" placeholder="port" required>
           <select class="select" name="auth"><option value="none">none</option><option value="sso">sso</option></select>
+          <input class="input" name="healthcheck_path" placeholder="health path, e.g. /health">
           <button class="btn secondary" type="submit">${icon("plus")} Add</button>
         </form>
       </div>
@@ -706,14 +712,24 @@ function renderLogsDrawer() {
 }
 
 function renderJobDrawer() {
+  const job = state.jobDrawer;
+  const log = job.log || job.error || "No output recorded yet.";
   return `
     <div class="drawer-backdrop" onclick="closeJob()"></div>
     <aside class="drawer wide-drawer">
       <div class="drawer-head">
-        <div><div class="section-title">Job #${state.jobDrawer.id}</div><div class="muted">${escapeHtml(state.jobDrawer.environment)}/${escapeHtml(state.jobDrawer.project)} · ${escapeHtml(state.jobDrawer.action)}</div></div>
+        <div><div class="section-title">Job #${job.id}</div><div class="muted">${escapeHtml(job.environment)}/${escapeHtml(job.project)} · ${escapeHtml(job.action)}</div></div>
         <button class="btn ghost" onclick="closeJob()">${icon("close")}</button>
       </div>
-      <pre class="log-box">${escapeHtml(state.jobDrawer.log || "")}</pre>
+      <div class="job-meta-grid">
+        <div class="fact compact"><span class="fact-label">Status</span><span class="fact-value">${badge(job.status, job.status)}</span></div>
+        <div class="fact compact"><span class="fact-label">Ref</span><span class="fact-value mono">${escapeHtml(job.ref || job.version || "-")}</span></div>
+        <div class="fact compact"><span class="fact-label">Started</span><span class="fact-value">${escapeHtml(formatTime(job.started_at))}</span></div>
+        <div class="fact compact"><span class="fact-label">Finished</span><span class="fact-value">${escapeHtml(formatTime(job.finished_at))}</span></div>
+      </div>
+      ${job.error ? `<div class="inline-error job-error"><div class="error-title">Error</div><div class="error-list"><div>${escapeHtml(job.error)}</div></div></div>` : ""}
+      ${job.log_truncated ? `<div class="muted log-note">Output is truncated by API limit. Use CLI or container logs for the full output.</div>` : ""}
+      <pre class="log-box">${escapeHtml(log)}</pre>
     </aside>
   `;
 }
@@ -853,7 +869,28 @@ function closeLogs() {
 }
 
 async function openJob(id) {
-  state.jobDrawer = await api(`/api/jobs/${id}`);
+  state.jobDrawer = {
+    id,
+    environment: "",
+    project: "",
+    action: "",
+    status: "loading",
+    log: "Loading job output...",
+  };
+  render();
+  try {
+    state.jobDrawer = await api(`/api/jobs/${id}?log_limit=120000`);
+  } catch (error) {
+    state.jobDrawer = {
+      id,
+      environment: "",
+      project: "",
+      action: "",
+      status: "failed",
+      error: error.message,
+      log: error.message,
+    };
+  }
   render();
 }
 
@@ -889,6 +926,7 @@ async function addEndpoint(event, environment, project) {
     subdomain: String(form.get("subdomain") || "").trim(),
     port: Number(form.get("port")),
     auth: form.get("auth"),
+    healthcheck_path: String(form.get("healthcheck_path") || "").trim() || null,
   };
   await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/endpoints`, { method: "POST", body: JSON.stringify(payload) });
   await refreshProject(environment, project);

@@ -81,6 +81,25 @@ GET    /api/services/{name}/status
 GET    /api/services/{name}/logs
 ```
 
+Environment project endpoint payload:
+
+```json
+{
+  "name": "web",
+  "component": "backend",
+  "port": 8000,
+  "host": null,
+  "subdomain": "myapp",
+  "path_prefix": null,
+  "auth": "sso",
+  "middlewares": [],
+  "healthcheck_path": "/health"
+}
+```
+
+`healthcheck_path` is optional. When set, the UI shows it next to the public endpoint and stores it in the
+deployer-managed endpoint configuration.
+
 ## Add Service
 
 Git source:
@@ -258,6 +277,8 @@ operation in the background, and returns HTTP `202` with the current job payload
 `GET /api/jobs/{job_id}` until `status` becomes `success` or `failed`.
 `GET /api/jobs` returns job metadata without heavy logs. Fetch a single job to inspect output.
 `GET /api/jobs/{job_id}?log_limit=200000` returns the most recent output up to `log_limit` characters.
+Job output includes source preparation lines where available, for example `git fetch`, `git checkout`,
+`git rev-parse HEAD`, generated override path, and the exact Docker Compose command.
 
 Deploy:
 

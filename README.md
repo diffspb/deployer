@@ -128,6 +128,10 @@ Open `http://127.0.0.1:8000/`. The UI uses the environment-project API: open an 
 it, configure components, endpoints, dependencies, env variables, deploy policy, jobs, logs, webhook events,
 and gated deploy candidates in that environment context.
 
+Endpoint configuration in the UI includes an optional health path, for example `/health`. Job output is opened
+from the Jobs page or project Recent Jobs table and shows source checkout metadata, generated override path,
+the Docker Compose command, and captured command output.
+
 ## Server Runbook
 
 Deployer is built from this repository on the server and started from the infrastructure repository.
