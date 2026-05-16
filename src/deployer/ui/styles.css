@@ -744,6 +744,24 @@ button:disabled {
   font-weight: 650;
 }
 
+.fact-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.link-btn {
+  background: transparent;
+  border: 0;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 760;
+  padding: 0;
+}
+
+.link-btn.danger {
+  color: var(--red);
+}
+
 .runtime-button-row {
   display: flex;
   flex-wrap: wrap;

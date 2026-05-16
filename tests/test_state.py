@@ -248,3 +248,41 @@ def test_state_stores_project_components_endpoints_and_dependencies(tmp_path: Pa
     assert endpoint.healthcheck_path == "/api/v1/health"
     assert dependency.outputs["DATABASE_URL"].startswith("postgresql://")
     assert state.list_dependencies("dev", "tasktrack")[0].target == "postgres-main/tasktrack_dev"
+
+    component = state.update_component(
+        "dev",
+        "tasktrack",
+        "backend",
+        mode="compose",
+        compose_service="api",
+        port=9000,
+    )
+    endpoint = state.update_endpoint(
+        "dev",
+        "tasktrack",
+        "api",
+        component="backend",
+        port=9000,
+        subdomain="api2.tasktrack",
+        auth="none",
+        healthcheck_path="/health",
+    )
+    dependency = state.update_dependency(
+        "dev",
+        "tasktrack",
+        "postgres",
+        type="postgres",
+        target="postgres-main/tasktrack_stage",
+        outputs={"DATABASE_URL": "postgresql://example/stage"},
+    )
+
+    assert component.compose_service == "api"
+    assert component.port == 9000
+    assert endpoint.subdomain == "api2.tasktrack"
+    assert endpoint.healthcheck_path == "/health"
+    assert dependency.target == "postgres-main/tasktrack_stage"
+
+    assert state.delete_endpoint("dev", "tasktrack", "api") is True
+    assert state.delete_endpoint("dev", "tasktrack", "api") is False
+    assert state.delete_dependency("dev", "tasktrack", "postgres") is True
+    assert state.delete_component("dev", "tasktrack", "backend") is True

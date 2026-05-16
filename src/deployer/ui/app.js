@@ -3,6 +3,7 @@ const state = {
   projects: [],
   jobs: [],
   webhookEvents: [],
+  version: null,
   currentView: { name: "dashboard" },
   theme: localStorage.getItem("deployer-theme") || "light",
   toast: "",
@@ -172,14 +173,16 @@ function renderVersion(project) {
 
 async function loadAll() {
   try {
-    const [environmentsPayload, jobsPayload, webhooksPayload] = await Promise.all([
+    const [environmentsPayload, jobsPayload, webhooksPayload, versionPayload] = await Promise.all([
       api("/api/environments"),
       api("/api/jobs?limit=100"),
       api("/api/webhook-events?limit=50"),
+      api("/api/version"),
     ]);
     state.environments = environmentsPayload.environments || [];
     state.jobs = jobsPayload.jobs || [];
     state.webhookEvents = webhooksPayload.events || [];
+    state.version = versionPayload;
     const projectLists = await Promise.all(
       state.environments.map((environment) => api(`/api/environments/${encodeURIComponent(environment.name)}/projects`)),
     );
@@ -341,11 +344,14 @@ function renderTopbar() {
         : state.currentView.name === "webhooks"
           ? "Webhook events"
           : "Environments dashboard";
+  const versionText = state.version
+    ? `api ${state.version.backend_version || "-"} · ui ${state.version.frontend_version || "-"} · build ${shortCommit(state.version.build_commit)}`
+    : "version loading";
   return `
     <header class="topbar">
       <div>
         <h1>${escapeHtml(title)}</h1>
-        <div class="hint">${state.environments.length} environments · ${state.projects.length} projects · ${activeJobs} active jobs · ${failedJobs} failed jobs</div>
+        <div class="hint">${state.environments.length} environments · ${state.projects.length} projects · ${activeJobs} active jobs · ${failedJobs} failed jobs · ${escapeHtml(versionText)}</div>
       </div>
       <div class="spacer"></div>
       <button class="btn secondary" onclick="refreshData()">${icon("refresh")} Refresh</button>
@@ -541,7 +547,16 @@ function renderProjectConfig(project) {
     <div class="config-grid">
       <div class="preview-panel">
         <div class="section-title">Components</div>
-        ${components.length ? components.map((item) => `<div class="fact compact"><span class="fact-label">${escapeHtml(item.name)}</span><span class="fact-value mono">${escapeHtml(item.mode)} · ${escapeHtml(item.compose_service || item.image || item.build_context || "-")}</span></div>`).join("") : `<div class="muted">No components.</div>`}
+        ${components.length ? components.map((item) => `
+          <div class="fact compact">
+            <span class="fact-label">${escapeHtml(item.name)}</span>
+            <span class="fact-value mono">${escapeHtml(item.mode)} · ${escapeHtml(item.compose_service || item.image || item.build_context || "-")}</span>
+            <span class="fact-actions">
+              <button class="link-btn" onclick="editComponent(${js(project.environment)}, ${js(project.name)}, ${js(item)})">Edit</button>
+              <button class="link-btn danger" onclick="deleteComponent(${js(project.environment)}, ${js(project.name)}, ${js(item.name)})">Delete</button>
+            </span>
+          </div>
+        `).join("") : `<div class="muted">No components.</div>`}
         <form class="inline-form top-gap" onsubmit="addComponent(event, ${js(project.environment)}, ${js(project.name)})">
           <input class="input" name="name" placeholder="name" required>
           <select class="select" name="mode"><option value="compose">compose</option><option value="build">build</option><option value="image">image</option></select>
@@ -556,6 +571,10 @@ function renderProjectConfig(project) {
           <div class="fact compact">
             <span class="fact-label">${escapeHtml(item.name)}</span>
             <span class="fact-value mono">${escapeHtml(item.public_url || item.subdomain || item.host || "-")}${item.healthcheck_path ? ` · health ${escapeHtml(item.healthcheck_path)}` : ""}</span>
+            <span class="fact-actions">
+              <button class="link-btn" onclick="editEndpoint(${js(project.environment)}, ${js(project.name)}, ${js(item)})">Edit</button>
+              <button class="link-btn danger" onclick="deleteEndpoint(${js(project.environment)}, ${js(project.name)}, ${js(item.name)})">Delete</button>
+            </span>
           </div>
         `).join("") : `<div class="muted">No endpoints.</div>`}
         <form class="inline-form top-gap" onsubmit="addEndpoint(event, ${js(project.environment)}, ${js(project.name)})">
@@ -579,7 +598,16 @@ function renderProjectConfig(project) {
       </div>
       <div class="preview-panel">
         <div class="section-title">Dependencies</div>
-        ${dependencies.length ? dependencies.map((item) => `<div class="fact compact"><span class="fact-label">${escapeHtml(item.name)}</span><span class="fact-value mono">${escapeHtml(item.type)} · ${escapeHtml(item.target)}</span></div>`).join("") : `<div class="muted">No dependencies.</div>`}
+        ${dependencies.length ? dependencies.map((item) => `
+          <div class="fact compact">
+            <span class="fact-label">${escapeHtml(item.name)}</span>
+            <span class="fact-value mono">${escapeHtml(item.type)} · ${escapeHtml(item.target)}</span>
+            <span class="fact-actions">
+              <button class="link-btn" onclick="editDependency(${js(project.environment)}, ${js(project.name)}, ${js(item)})">Edit</button>
+              <button class="link-btn danger" onclick="deleteDependency(${js(project.environment)}, ${js(project.name)}, ${js(item.name)})">Delete</button>
+            </span>
+          </div>
+        `).join("") : `<div class="muted">No dependencies.</div>`}
         <form class="inline-form top-gap" onsubmit="addDependency(event, ${js(project.environment)}, ${js(project.name)})">
           <input class="input" name="name" placeholder="name" required>
           <input class="input" name="type" placeholder="type" required>
@@ -916,6 +944,34 @@ async function addComponent(event, environment, project) {
   render();
 }
 
+async function editComponent(environment, project, component) {
+  const mode = prompt("Component mode: compose, build, image", component.mode || "compose");
+  if (mode === null) return;
+  const target = prompt("Compose service / build context / image", component.compose_service || component.build_context || component.image || "");
+  if (target === null) return;
+  const portText = prompt("Port, empty for none", component.port || "");
+  if (portText === null) return;
+  const payload = {
+    name: component.name,
+    mode,
+    port: Number(portText) || null,
+    env: component.env || {},
+  };
+  if (mode === "compose") payload.compose_service = target.trim();
+  if (mode === "build") payload.build_context = target.trim();
+  if (mode === "image") payload.image = target.trim();
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/components/${encodeURIComponent(component.name)}`, { method: "PATCH", body: JSON.stringify(payload) });
+  await refreshProject(environment, project);
+  render();
+}
+
+async function deleteComponent(environment, project, component) {
+  if (!confirm(`Delete component ${component}? Endpoints attached to it will also be deleted.`)) return;
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/components/${encodeURIComponent(component)}`, { method: "DELETE" });
+  await refreshProject(environment, project);
+  render();
+}
+
 async function addEndpoint(event, environment, project) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
@@ -928,6 +984,44 @@ async function addEndpoint(event, environment, project) {
     healthcheck_path: String(form.get("healthcheck_path") || "").trim() || null,
   };
   await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/endpoints`, { method: "POST", body: JSON.stringify(payload) });
+  await refreshProject(environment, project);
+  render();
+}
+
+async function editEndpoint(environment, project, endpoint) {
+  const component = prompt("Component", endpoint.component || "");
+  if (component === null) return;
+  const subdomain = prompt("Subdomain, empty if using host", endpoint.subdomain || "");
+  if (subdomain === null) return;
+  const host = prompt("Host, empty if using subdomain", endpoint.host || "");
+  if (host === null) return;
+  const portText = prompt("Port", endpoint.port || "");
+  if (portText === null) return;
+  const auth = prompt("Auth: none or sso", endpoint.auth || "none");
+  if (auth === null) return;
+  const healthcheckPath = prompt("Health path, empty for none", endpoint.healthcheck_path || "");
+  if (healthcheckPath === null) return;
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/endpoints/${encodeURIComponent(endpoint.name)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: endpoint.name,
+      component: component.trim(),
+      subdomain: subdomain.trim() || null,
+      host: host.trim() || null,
+      port: Number(portText),
+      auth: auth.trim() || "none",
+      middlewares: endpoint.middlewares || [],
+      path_prefix: endpoint.path_prefix || null,
+      healthcheck_path: healthcheckPath.trim() || null,
+    }),
+  });
+  await refreshProject(environment, project);
+  render();
+}
+
+async function deleteEndpoint(environment, project, endpoint) {
+  if (!confirm(`Delete endpoint ${endpoint}?`)) return;
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/endpoints/${encodeURIComponent(endpoint)}`, { method: "DELETE" });
   await refreshProject(environment, project);
   render();
 }
@@ -950,6 +1044,40 @@ async function addDependency(event, environment, project) {
       outputs,
     }),
   });
+  await refreshProject(environment, project);
+  render();
+}
+
+async function editDependency(environment, project, dependency) {
+  const type = prompt("Dependency type", dependency.type || "");
+  if (type === null) return;
+  const target = prompt("Dependency target", dependency.target || "");
+  if (target === null) return;
+  const outputsText = prompt("Outputs JSON object", JSON.stringify(dependency.outputs || {}));
+  if (outputsText === null) return;
+  let outputs = {};
+  try {
+    outputs = outputsText.trim() ? JSON.parse(outputsText) : {};
+  } catch (error) {
+    setToast(`Invalid outputs JSON: ${error.message}`);
+    return;
+  }
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/dependencies/${encodeURIComponent(dependency.name)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: dependency.name,
+      type: type.trim(),
+      target: target.trim(),
+      outputs,
+    }),
+  });
+  await refreshProject(environment, project);
+  render();
+}
+
+async function deleteDependency(environment, project, dependency) {
+  if (!confirm(`Delete dependency ${dependency}?`)) return;
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/dependencies/${encodeURIComponent(dependency)}`, { method: "DELETE" });
   await refreshProject(environment, project);
   render();
 }

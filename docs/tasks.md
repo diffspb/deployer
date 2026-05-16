@@ -115,13 +115,13 @@
 - [x] Stop auto-creating `prod/dev` runtime targets for every new service.
 - [x] Add environment-first UI navigation and attach flow.
 - [x] Add endpoint `health_path` field to the Web UI endpoint form.
-- [ ] Add edit/delete actions for project endpoints in the Web UI.
-- [ ] Add edit/delete actions for project components in the Web UI.
-- [ ] Add edit/delete actions for project dependencies in the Web UI.
-- [ ] Add deployer build/version metadata for backend and frontend.
-- [ ] Expose backend and frontend versions through the API.
-- [ ] Show backend/frontend versions in the Web UI header or system panel.
-- [ ] Add frontend asset cache-busting so updated UI is visible after deploy.
+- [x] Add edit/delete actions for project endpoints in the Web UI.
+- [x] Add edit/delete actions for project components in the Web UI.
+- [x] Add edit/delete actions for project dependencies in the Web UI.
+- [x] Add deployer build/version metadata for backend and frontend.
+- [x] Expose backend and frontend versions through the API.
+- [x] Show backend/frontend versions in the Web UI header or system panel.
+- [x] Add frontend asset cache-busting so updated UI is visible after deploy.
 - [ ] Add mobile navigation for small screens.
 
 ## Runtime Targets v2

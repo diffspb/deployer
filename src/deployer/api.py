@@ -8,11 +8,12 @@ import re
 from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from deployer import __version__
 from deployer.catalog import CatalogError, ServiceCatalog, render_env
 from deployer.config import DeployerConfig, load_config
 from deployer.engine import DeploymentEngine
@@ -129,6 +130,7 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
     app.state.config = config
     ui_dir = Path(__file__).parent / "ui"
     app.mount("/ui", StaticFiles(directory=ui_dir), name="ui")
+    frontend_version = _frontend_version(ui_dir)
 
     @app.exception_handler(CatalogError)
     async def catalog_error_handler(request: Request, exc: CatalogError):
@@ -143,8 +145,21 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/")
-    def root() -> FileResponse:
-        return FileResponse(ui_dir / "index.html")
+    def root() -> HTMLResponse:
+        html = (ui_dir / "index.html").read_text()
+        html = html.replace("/ui/styles.css", f"/ui/styles.css?v={frontend_version}")
+        html = html.replace("/ui/app.js", f"/ui/app.js?v={frontend_version}")
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/version")
+    def version() -> dict[str, str]:
+        build_info = _build_info()
+        return {
+            "backend_version": __version__,
+            "frontend_version": frontend_version,
+            "build_commit": build_info.get("commit", "unknown"),
+            "build_date": build_info.get("date", "unknown"),
+        }
 
     @app.get("/api/services")
     def list_services(catalog: CatalogDep) -> list[dict]:
@@ -330,6 +345,41 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         )
         return {"component": _component_payload(component)}
 
+    @app.patch("/api/environments/{environment}/projects/{project}/components/{component_name}")
+    def update_project_component(
+        environment: str,
+        project: str,
+        component_name: str,
+        payload: AddComponentRequest,
+        catalog: CatalogDep,
+    ) -> dict:
+        component = catalog.update_component(
+            environment,
+            project,
+            component_name,
+            mode=payload.mode,
+            compose_service=payload.compose_service,
+            build_context=payload.build_context,
+            dockerfile=payload.dockerfile,
+            image=payload.image,
+            command=payload.command,
+            port=payload.port,
+            env_vars=payload.env,
+        )
+        return {"component": _component_payload(component)}
+
+    @app.delete("/api/environments/{environment}/projects/{project}/components/{component_name}")
+    def delete_project_component(
+        environment: str,
+        project: str,
+        component_name: str,
+        catalog: CatalogDep,
+    ) -> dict:
+        removed = catalog.delete_component(environment, project, component_name)
+        if not removed:
+            raise HTTPException(status_code=404, detail=f"Unknown component: {component_name}")
+        return {"removed": True, "component": component_name}
+
     @app.post("/api/environments/{environment}/projects/{project}/endpoints", status_code=201)
     def add_project_endpoint(
         environment: str,
@@ -352,6 +402,41 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         )
         return {"endpoint": _endpoint_payload(catalog, environment, project, endpoint)}
 
+    @app.patch("/api/environments/{environment}/projects/{project}/endpoints/{endpoint_name}")
+    def update_project_endpoint(
+        environment: str,
+        project: str,
+        endpoint_name: str,
+        payload: AddEndpointRequest,
+        catalog: CatalogDep,
+    ) -> dict:
+        endpoint = catalog.update_endpoint(
+            environment,
+            project,
+            endpoint_name,
+            payload.component,
+            payload.port,
+            host=payload.host,
+            subdomain=payload.subdomain,
+            path_prefix=payload.path_prefix,
+            auth=payload.auth,
+            middlewares=tuple(payload.middlewares),
+            healthcheck_path=payload.healthcheck_path,
+        )
+        return {"endpoint": _endpoint_payload(catalog, environment, project, endpoint)}
+
+    @app.delete("/api/environments/{environment}/projects/{project}/endpoints/{endpoint_name}")
+    def delete_project_endpoint(
+        environment: str,
+        project: str,
+        endpoint_name: str,
+        catalog: CatalogDep,
+    ) -> dict:
+        removed = catalog.delete_endpoint(environment, project, endpoint_name)
+        if not removed:
+            raise HTTPException(status_code=404, detail=f"Unknown endpoint: {endpoint_name}")
+        return {"removed": True, "endpoint": endpoint_name}
+
     @app.post("/api/environments/{environment}/projects/{project}/dependencies", status_code=201)
     def add_project_dependency(
         environment: str,
@@ -368,6 +453,36 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
             outputs=payload.outputs,
         )
         return {"dependency": _dependency_payload(dependency)}
+
+    @app.patch("/api/environments/{environment}/projects/{project}/dependencies/{dependency_name}")
+    def update_project_dependency(
+        environment: str,
+        project: str,
+        dependency_name: str,
+        payload: AddDependencyRequest,
+        catalog: CatalogDep,
+    ) -> dict:
+        dependency = catalog.update_dependency(
+            environment,
+            project,
+            dependency_name,
+            payload.type,
+            payload.target,
+            outputs=payload.outputs,
+        )
+        return {"dependency": _dependency_payload(dependency)}
+
+    @app.delete("/api/environments/{environment}/projects/{project}/dependencies/{dependency_name}")
+    def delete_project_dependency(
+        environment: str,
+        project: str,
+        dependency_name: str,
+        catalog: CatalogDep,
+    ) -> dict:
+        removed = catalog.delete_dependency(environment, project, dependency_name)
+        if not removed:
+            raise HTTPException(status_code=404, detail=f"Unknown dependency: {dependency_name}")
+        return {"removed": True, "dependency": dependency_name}
 
     @app.get("/api/environments/{environment}/projects/{project}/preview")
     def project_preview(environment: str, project: str, catalog: CatalogDep) -> dict:
@@ -1332,6 +1447,26 @@ def _job_payload(job: JobRecord | None, log_limit: int | None = None) -> dict:
         "log_truncated": log_truncated,
         "error": job.error,
     }
+
+
+def _frontend_version(ui_dir: Path) -> str:
+    digest = hashlib.sha256()
+    for name in ("index.html", "styles.css", "app.js"):
+        path = ui_dir / name
+        if path.exists():
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
+def _build_info() -> dict[str, str]:
+    path = Path("/app/build-info.json")
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {str(key): str(value) for key, value in data.items() if value is not None}
 
 
 app = create_app()

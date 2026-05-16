@@ -105,11 +105,15 @@ Implemented environment-project API:
 GET/POST /api/environments/{environment}/projects
 GET/DELETE /api/environments/{environment}/projects/{project}
 POST /api/environments/{environment}/projects/{project}/components
+PATCH/DELETE /api/environments/{environment}/projects/{project}/components/{component}
 POST /api/environments/{environment}/projects/{project}/endpoints
+PATCH/DELETE /api/environments/{environment}/projects/{project}/endpoints/{endpoint}
 POST /api/environments/{environment}/projects/{project}/dependencies
+PATCH/DELETE /api/environments/{environment}/projects/{project}/dependencies/{dependency}
 POST /api/environments/{environment}/projects/{project}/deploy
 GET  /api/environments/{environment}/projects/{project}/status
 GET  /api/environments/{environment}/projects/{project}/logs
+GET  /api/version
 POST /api/webhooks/github
 GET  /api/webhook-events
 ```
@@ -131,6 +135,7 @@ and gated deploy candidates in that environment context.
 Endpoint configuration in the UI includes an optional health path, for example `/health`. Job output is opened
 from the Jobs page or project Recent Jobs table and shows source checkout metadata, generated override path,
 the Docker Compose command, and captured command output.
+The UI also shows backend/frontend version metadata and serves frontend assets with a version query string.
 
 ## Server Runbook
 
@@ -154,7 +159,7 @@ Rebuild deployer after `git pull` in `~/paas_deployer`:
 
 ```bash
 cd ~/paas_deployer
-docker build -t home-paas-deployer:latest .
+make docker-build
 cd ~/simple_infra
 make deployer-down
 make deployer-up
@@ -174,7 +179,7 @@ Typical full update sequence on the server:
 ```bash
 cd ~/paas_deployer
 git pull
-docker build -t home-paas-deployer:latest .
+make docker-build
 cd ~/simple_infra
 make deployer-config
 make deployer-down

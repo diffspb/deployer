@@ -313,6 +313,100 @@ class ServiceCatalog:
         except sqlite3.IntegrityError as exc:
             raise CatalogError(f"Endpoint already exists: {environment}/{project}/{name}") from exc
 
+    def update_component(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        mode: str = "compose",
+        compose_service: str | None = None,
+        build_context: str | None = None,
+        dockerfile: str | None = None,
+        image: str | None = None,
+        command: str | None = None,
+        port: int | None = None,
+        env_vars: dict[str, str] | None = None,
+    ) -> ProjectComponentRecord:
+        _validate_project_scope(environment, project)
+        _validate_component_name(name)
+        _validate_component(mode, compose_service, build_context, dockerfile, image, port)
+        for key, value in (env_vars or {}).items():
+            _validate_env_key(key)
+            if "\n" in value:
+                raise CatalogError("Environment values must be single-line")
+        try:
+            return self.state.update_component(
+                environment,
+                project,
+                name,
+                mode=mode,
+                compose_service=compose_service,
+                build_context=build_context,
+                dockerfile=dockerfile,
+                image=image,
+                command=command,
+                port=port,
+                env_vars=env_vars,
+            )
+        except KeyError as exc:
+            raise CatalogError(f"Unknown component: {environment}/{project}/{name}") from exc
+
+    def delete_component(self, environment: str, project: str, name: str) -> bool:
+        _validate_project_scope(environment, project)
+        _validate_component_name(name)
+        return self.state.delete_component(environment, project, name)
+
+    def update_endpoint(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        component: str,
+        port: int,
+        host: str | None = None,
+        subdomain: str | None = None,
+        path_prefix: str | None = None,
+        auth: str = "none",
+        middlewares: tuple[str, ...] = (),
+        healthcheck_path: str | None = None,
+    ) -> ProjectEndpointRecord:
+        _validate_project_scope(environment, project)
+        _validate_component_name(name)
+        _validate_component_name(component)
+        if port <= 0:
+            raise CatalogError("Endpoint port must be positive")
+        if not host and not subdomain:
+            raise CatalogError("Endpoint must define host or subdomain")
+        if host and subdomain:
+            raise CatalogError("Endpoint must not define both host and subdomain")
+        if auth not in {"none", "sso"}:
+            raise CatalogError("Endpoint auth must be one of: none, sso")
+        if path_prefix is not None and not path_prefix.startswith("/"):
+            raise CatalogError("Endpoint path prefix must start with /")
+        if healthcheck_path is not None and not healthcheck_path.startswith("/"):
+            raise CatalogError("Endpoint healthcheck path must start with /")
+        try:
+            return self.state.update_endpoint(
+                environment,
+                project,
+                name,
+                component=component,
+                port=port,
+                host=host,
+                subdomain=subdomain,
+                path_prefix=path_prefix,
+                auth=auth,
+                middlewares=middlewares,
+                healthcheck_path=healthcheck_path,
+            )
+        except KeyError as exc:
+            raise CatalogError(f"Unknown endpoint or component: {environment}/{project}/{name}") from exc
+
+    def delete_endpoint(self, environment: str, project: str, name: str) -> bool:
+        _validate_project_scope(environment, project)
+        _validate_component_name(name)
+        return self.state.delete_endpoint(environment, project, name)
+
     def add_dependency(
         self,
         environment: str,
@@ -338,6 +432,35 @@ class ServiceCatalog:
             raise CatalogError(f"Unknown project: {environment}/{project}") from exc
         except sqlite3.IntegrityError as exc:
             raise CatalogError(f"Dependency already exists: {environment}/{project}/{name}") from exc
+
+    def update_dependency(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        type: str,
+        target: str,
+        outputs: dict[str, str] | None = None,
+    ) -> ProjectDependencyRecord:
+        _validate_project_scope(environment, project)
+        _validate_component_name(name)
+        if not type.strip():
+            raise CatalogError("Dependency type must be non-empty")
+        if not target.strip():
+            raise CatalogError("Dependency target must be non-empty")
+        for key, value in (outputs or {}).items():
+            _validate_env_key(key)
+            if "\n" in value:
+                raise CatalogError("Dependency outputs must be single-line")
+        try:
+            return self.state.update_dependency(environment, project, name, type=type, target=target, outputs=outputs)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown dependency: {environment}/{project}/{name}") from exc
+
+    def delete_dependency(self, environment: str, project: str, name: str) -> bool:
+        _validate_project_scope(environment, project)
+        _validate_component_name(name)
+        return self.state.delete_dependency(environment, project, name)
 
     def set_project_env(self, environment: str, project: str, key: str, value: str) -> EnvironmentProjectRecord:
         _validate_project_scope(environment, project)

@@ -15,6 +15,10 @@ COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/
 COPY pyproject.toml README.md ./
 COPY src ./src
 
+ARG DEPLOYER_BUILD_COMMIT=unknown
+ARG DEPLOYER_BUILD_DATE=unknown
+RUN printf '{"commit":"%s","date":"%s"}\n' "$DEPLOYER_BUILD_COMMIT" "$DEPLOYER_BUILD_DATE" > /app/build-info.json
+
 RUN pip install --no-cache-dir .
 
 ENV PYTHONPATH=/app/src \

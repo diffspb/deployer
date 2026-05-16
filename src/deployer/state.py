@@ -777,6 +777,53 @@ class StateStore:
             raise KeyError(f"{environment}:{project}:{name}")
         return component
 
+    def update_component(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        *,
+        mode: str,
+        compose_service: str | None = None,
+        build_context: str | None = None,
+        dockerfile: str | None = None,
+        image: str | None = None,
+        command: str | None = None,
+        port: int | None = None,
+        env_vars: dict[str, str] | None = None,
+    ) -> ProjectComponentRecord:
+        component = self.require_component(environment, project, name)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE project_components
+                SET mode = ?, compose_service = ?, build_context = ?, dockerfile = ?,
+                    image = ?, command = ?, port = ?, env_vars_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    mode,
+                    compose_service,
+                    build_context,
+                    dockerfile,
+                    image,
+                    command,
+                    port,
+                    json.dumps(env_vars or {}, sort_keys=True),
+                    _now(),
+                    component.id,
+                ),
+            )
+        return self.require_component(environment, project, name)
+
+    def delete_component(self, environment: str, project: str, name: str) -> bool:
+        component = self.get_component(environment, project, name)
+        if component is None:
+            return False
+        with self._connect() as conn:
+            conn.execute("DELETE FROM project_components WHERE id = ?", (component.id,))
+        return True
+
     def add_endpoint(
         self,
         environment: str,
@@ -855,6 +902,54 @@ class StateStore:
             raise KeyError(f"{environment}:{project}:{name}")
         return endpoint
 
+    def update_endpoint(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        *,
+        component: str,
+        port: int,
+        host: str | None = None,
+        subdomain: str | None = None,
+        path_prefix: str | None = None,
+        auth: str = "none",
+        middlewares: tuple[str, ...] = (),
+        healthcheck_path: str | None = None,
+    ) -> ProjectEndpointRecord:
+        endpoint = self.require_endpoint(environment, project, name)
+        self.require_component(environment, project, component)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE project_endpoints
+                SET component = ?, port = ?, host = ?, subdomain = ?, path_prefix = ?,
+                    auth = ?, middlewares_json = ?, healthcheck_path = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    component,
+                    port,
+                    host,
+                    subdomain,
+                    path_prefix,
+                    auth,
+                    json.dumps(list(middlewares)),
+                    healthcheck_path,
+                    _now(),
+                    endpoint.id,
+                ),
+            )
+        return self.require_endpoint(environment, project, name)
+
+    def delete_endpoint(self, environment: str, project: str, name: str) -> bool:
+        endpoint = self.get_endpoint(environment, project, name)
+        if endpoint is None:
+            return False
+        with self._connect() as conn:
+            conn.execute("DELETE FROM project_endpoints WHERE id = ?", (endpoint.id,))
+        return True
+
     def add_dependency(
         self,
         environment: str,
@@ -910,6 +1005,36 @@ class StateStore:
         if dependency is None:
             raise KeyError(f"{environment}:{project}:{name}")
         return dependency
+
+    def update_dependency(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        *,
+        type: str,
+        target: str,
+        outputs: dict[str, str] | None = None,
+    ) -> ProjectDependencyRecord:
+        dependency = self.require_dependency(environment, project, name)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE project_dependencies
+                SET type = ?, target = ?, outputs_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (type, target, json.dumps(outputs or {}, sort_keys=True), _now(), dependency.id),
+            )
+        return self.require_dependency(environment, project, name)
+
+    def delete_dependency(self, environment: str, project: str, name: str) -> bool:
+        dependency = self.get_dependency(environment, project, name)
+        if dependency is None:
+            return False
+        with self._connect() as conn:
+            conn.execute("DELETE FROM project_dependencies WHERE id = ?", (dependency.id,))
+        return True
 
     def list_environments(self, service_name: str) -> list[EnvironmentRecord]:
         with self._connect() as conn:

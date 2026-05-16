@@ -4,6 +4,8 @@ DEV_STATE_DB ?= .deployer/state.db
 DEV_RUNTIME_DIR ?= .deployer/runtime
 TEST_STATE_DB ?= /tmp/deployer-state.sqlite3
 TEST_RUNTIME_DIR ?= /tmp/deployer-runtime
+BUILD_COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 .PHONY: venv install test coverage api validate-samples render-tasktrack render-cpucol docker-build reset-dev reset-test clean
 
@@ -37,7 +39,10 @@ status-cpucol:
 	$(PYTHON) -m deployer.cli status /home/sanek/projects/claudecode/test_proj --manifest docs/sample-manifests/cpucol.deployer.yml --environment dev
 
 docker-build:
-	docker build -t home-paas-deployer:latest .
+	docker build \
+		--build-arg DEPLOYER_BUILD_COMMIT="$(BUILD_COMMIT)" \
+		--build-arg DEPLOYER_BUILD_DATE="$(BUILD_DATE)" \
+		-t home-paas-deployer:latest .
 
 reset-dev:
 	rm -f "$(DEV_STATE_DB)"

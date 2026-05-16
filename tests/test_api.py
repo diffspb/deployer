@@ -51,10 +51,17 @@ def test_api_health_and_root(tmp_path: Path):
     response = client.get("/")
     assert response.status_code == 200
     assert "deployer-root" in response.text
+    assert "/ui/app.js?v=" in response.text
+    assert "/ui/styles.css?v=" in response.text
 
     response = client.get("/ui/app.js")
     assert response.status_code == 200
     assert "loadAll" in response.text
+
+    response = client.get("/api/version")
+    assert response.status_code == 200
+    assert response.json()["backend_version"]
+    assert response.json()["frontend_version"]
 
 
 def test_api_service_local_env_deploy_history_and_delete(tmp_path: Path):
@@ -264,6 +271,44 @@ services:
     assert response.status_code == 201
     assert response.json()["dependency"]["outputs"]["DATABASE_URL"] == "postgresql://example/tasktrack_dev"
 
+    response = client.patch(
+        "/api/environments/dev/projects/tasktrack/components/web",
+        json={
+            "name": "web",
+            "mode": "compose",
+            "compose_service": "app",
+            "port": 9000,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["component"]["port"] == 9000
+
+    response = client.patch(
+        "/api/environments/dev/projects/tasktrack/endpoints/web",
+        json={
+            "name": "web",
+            "component": "web",
+            "port": 9000,
+            "subdomain": "tasktrack",
+            "auth": "sso",
+            "healthcheck_path": "/ready",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["endpoint"]["healthcheck_path"] == "/ready"
+
+    response = client.patch(
+        "/api/environments/dev/projects/tasktrack/dependencies/postgres",
+        json={
+            "name": "postgres",
+            "type": "postgres",
+            "target": "postgres-main/tasktrack_stage",
+            "outputs": {"DATABASE_URL": "postgresql://example/tasktrack_stage"},
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["dependency"]["target"] == "postgres-main/tasktrack_stage"
+
     response = client.post(
         "/api/environments/dev/projects/tasktrack/env",
         json={"key": "APP_ENV", "value": "dev"},
@@ -274,7 +319,7 @@ services:
     detail = client.get("/api/environments/dev/projects/tasktrack").json()
     assert detail["components"][0]["name"] == "web"
     assert detail["endpoints"][0]["public_url"] == "https://tasktrack.dev.busypage.ru/"
-    assert detail["dependencies"][0]["target"] == "postgres-main/tasktrack_dev"
+    assert detail["dependencies"][0]["target"] == "postgres-main/tasktrack_stage"
     assert detail["public_urls"] == ["https://tasktrack.dev.busypage.ru/"]
 
     projects = client.get("/api/environments/dev/projects").json()
@@ -285,7 +330,7 @@ services:
     assert preview.status_code == 200
     assert preview.json()["valid"] is True
     assert "Host(`tasktrack.dev.busypage.ru`)" in preview.json()["override_content"]
-    assert preview.json()["env_file_content"] == "APP_ENV=dev\nDATABASE_URL=postgresql://example/tasktrack_dev\n"
+    assert preview.json()["env_file_content"] == "APP_ENV=dev\nDATABASE_URL=postgresql://example/tasktrack_stage\n"
 
     response = client.post(
         "/api/environments/dev/projects/tasktrack/deploy",
@@ -302,6 +347,10 @@ services:
     detail = client.get("/api/environments/dev/projects/tasktrack").json()
     assert detail["current_ref"] == "dev"
     assert detail["last_deployment_id"] == job["deployment_id"]
+
+    assert client.delete("/api/environments/dev/projects/tasktrack/endpoints/web").status_code == 200
+    assert client.delete("/api/environments/dev/projects/tasktrack/dependencies/postgres").status_code == 200
+    assert client.delete("/api/environments/dev/projects/tasktrack/components/web").status_code == 200
 
     response = client.delete("/api/environments/dev/projects/tasktrack/env/APP_ENV")
     assert response.status_code == 200

@@ -33,6 +33,7 @@ make api
 
 ```text
 GET    /api/health
+GET    /api/version
 GET    /api/services
 POST   /api/services
 GET    /api/services/{name}
@@ -50,8 +51,14 @@ GET    /api/environments/{environment}/projects/{project}/env
 POST   /api/environments/{environment}/projects/{project}/env
 DELETE /api/environments/{environment}/projects/{project}/env/{key}
 POST   /api/environments/{environment}/projects/{project}/components
+PATCH  /api/environments/{environment}/projects/{project}/components/{component}
+DELETE /api/environments/{environment}/projects/{project}/components/{component}
 POST   /api/environments/{environment}/projects/{project}/endpoints
+PATCH  /api/environments/{environment}/projects/{project}/endpoints/{endpoint}
+DELETE /api/environments/{environment}/projects/{project}/endpoints/{endpoint}
 POST   /api/environments/{environment}/projects/{project}/dependencies
+PATCH  /api/environments/{environment}/projects/{project}/dependencies/{dependency}
+DELETE /api/environments/{environment}/projects/{project}/dependencies/{dependency}
 GET    /api/environments/{environment}/projects/{project}/preview
 POST   /api/environments/{environment}/projects/{project}/deploy
 POST   /api/environments/{environment}/projects/{project}/stop
@@ -99,6 +106,17 @@ Environment project endpoint payload:
 
 `healthcheck_path` is optional. When set, the UI shows it next to the public endpoint and stores it in the
 deployer-managed endpoint configuration.
+
+`GET /api/version` returns backend package version, frontend asset hash, and optional Docker build metadata:
+
+```json
+{
+  "backend_version": "0.1.0",
+  "frontend_version": "a1b2c3d4e5f6",
+  "build_commit": "unknown",
+  "build_date": "unknown"
+}
+```
 
 ## Add Service
 
