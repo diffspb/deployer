@@ -190,7 +190,6 @@ async function loadAll() {
       await refreshProject(state.currentView.environment, state.currentView.project);
     }
     render();
-    refreshStatuses();
   } catch (error) {
     state.loadError = error.message;
     render();
@@ -993,4 +992,4 @@ function toggleTheme() {
   render();
 }
 
-loadAll().then(startPolling);
+loadAll();
