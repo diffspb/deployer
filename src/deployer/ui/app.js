@@ -233,6 +233,18 @@ async function refreshStatuses() {
   render();
 }
 
+async function refreshStatus(environment, project) {
+  state.runtimeStatus[projectKey(environment, project)] = { ...statusFor(environment, project), loading: true };
+  render();
+  try {
+    const response = await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/status`);
+    state.runtimeStatus[projectKey(environment, project)] = parseStatus(environment, project, response);
+  } catch (error) {
+    state.runtimeStatus[projectKey(environment, project)] = { loading: false, state: "unknown", health: "unknown", raw: error.message };
+  }
+  render();
+}
+
 async function refreshActivity() {
   try {
     const [jobsPayload, webhooksPayload] = await Promise.all([
@@ -247,6 +259,21 @@ async function refreshActivity() {
     render();
   } catch (error) {
     console.warn("Activity refresh failed", error);
+  }
+}
+
+async function refreshProjectActivity(environment, project) {
+  try {
+    const [jobsPayload, webhooksPayload] = await Promise.all([
+      api("/api/jobs?limit=100"),
+      api("/api/webhook-events?limit=50"),
+    ]);
+    state.jobs = jobsPayload.jobs || [];
+    state.webhookEvents = webhooksPayload.events || [];
+    await refreshProject(environment, project);
+    render();
+  } catch (error) {
+    setToast(error.message);
   }
 }
 
@@ -359,6 +386,9 @@ function renderTopbar() {
         <div class="hint">${state.environments.length} environments · ${state.projects.length} projects · ${activeJobs} active jobs · ${failedJobs} failed jobs · ${escapeHtml(versionText)}</div>
       </div>
       <div class="spacer"></div>
+      ${state.currentView.name === "project" ? `<button class="btn secondary" onclick="refreshStatus(${js(state.currentView.environment)}, ${js(state.currentView.project)})">${icon("refresh")} Refresh status</button>` : ""}
+      ${state.currentView.name === "project" ? `<button class="btn secondary" onclick="refreshProjectActivity(${js(state.currentView.environment)}, ${js(state.currentView.project)})">${icon("history")} Refresh jobs</button>` : ""}
+      ${state.currentView.name === "jobs" || state.currentView.name === "webhooks" ? `<button class="btn secondary" onclick="refreshActivityOnly()">${icon("refresh")} Refresh activity</button>` : ""}
       <button class="btn secondary" onclick="refreshData()">${icon("refresh")} Refresh</button>
       ${state.currentView.name !== "jobs" && state.currentView.name !== "webhooks" ? `<button class="btn primary" onclick="openAddProject()">${icon("plus")} Add project</button>` : ""}
     </header>
@@ -507,6 +537,7 @@ function renderProjectView() {
         ${project.candidate_ref ? renderCandidate(project) : ""}
         <div class="runtime-button-row">
           <button class="btn primary" onclick="openDeploy(${js(project.environment)}, ${js(project.name)})">${icon("play")} Deploy</button>
+          <button class="btn secondary" onclick="refreshStatus(${js(project.environment)}, ${js(project.name)})">${icon("refresh")} Refresh status</button>
           ${project.candidate_ref ? `<button class="btn primary" onclick="deployCandidate(${js(project.environment)}, ${js(project.name)})">${icon("play")} Deploy candidate</button>` : ""}
           <button class="btn secondary" onclick="runtimeAction(${js(project.environment)}, ${js(project.name)}, 'restart')">${icon("refresh")} Restart</button>
           <button class="btn secondary" onclick="runtimeAction(${js(project.environment)}, ${js(project.name)}, 'stop')">${icon("stop")} Stop</button>
@@ -751,7 +782,10 @@ function renderJobDrawer() {
     <aside class="drawer wide-drawer">
       <div class="drawer-head">
         <div><div class="section-title">Job #${job.id}</div><div class="muted">${escapeHtml(job.environment)}/${escapeHtml(job.project)} · ${escapeHtml(job.action)}</div></div>
-        <button class="btn ghost" onclick="closeJob()">${icon("close")}</button>
+        <div class="row">
+          <button class="btn secondary" onclick="refreshOpenJob()">${icon("refresh")} Refresh job</button>
+          <button class="btn ghost" onclick="closeJob()">${icon("close")}</button>
+        </div>
       </div>
       <div class="job-meta-grid">
         <div class="fact compact"><span class="fact-label">Status</span><span class="fact-value">${badge(job.status, job.status)}</span></div>
@@ -853,7 +887,7 @@ async function submitDeploy(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
   const { environment, project } = state.deployModal;
-  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/deploy`, {
+  const job = await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/deploy`, {
     method: "POST",
     body: JSON.stringify({
       ref: String(form.get("ref") || "").trim() || null,
@@ -861,26 +895,29 @@ async function submitDeploy(event) {
     }),
   });
   state.deployModal = null;
+  upsertJob(job);
   setToast("Deploy job scheduled");
-  await loadAll();
+  await openJob(job.id);
 }
 
 async function deployCandidate(environment, project) {
-  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/deploy-candidate`, {
+  const job = await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/deploy-candidate`, {
     method: "POST",
     body: JSON.stringify({ dry_run: false }),
   });
+  upsertJob(job);
   setToast("Candidate deploy scheduled");
-  await loadAll();
+  await openJob(job.id);
 }
 
 async function runtimeAction(environment, project, action) {
-  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/${action}`, {
+  const job = await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/${action}`, {
     method: "POST",
     body: JSON.stringify({ dry_run: false }),
   });
+  upsertJob(job);
   setToast(`${action} job scheduled`);
-  await loadAll();
+  await openJob(job.id);
 }
 
 async function openLogs(environment, project) {
@@ -924,6 +961,17 @@ async function openJob(id) {
     };
   }
   render();
+}
+
+async function refreshOpenJob() {
+  if (!state.jobDrawer?.id) return;
+  await openJob(state.jobDrawer.id);
+}
+
+function upsertJob(job) {
+  const index = state.jobs.findIndex((item) => item.id === job.id);
+  if (index >= 0) state.jobs[index] = job;
+  else state.jobs.unshift(job);
 }
 
 function closeJob() {
@@ -1116,6 +1164,11 @@ function setFilter(key, value) {
 async function refreshData() {
   await loadAll();
   setToast("Refreshed");
+}
+
+async function refreshActivityOnly() {
+  await refreshActivity();
+  setToast("Activity refreshed");
 }
 
 function toggleTheme() {
