@@ -135,7 +135,9 @@ and gated deploy candidates in that environment context.
 Endpoint configuration in the UI includes an optional health path, for example `/health`. Job output is opened
 from the Jobs page or project Recent Jobs table and shows source checkout metadata, generated override path,
 the Docker Compose command, and captured command output.
-The UI also shows backend/frontend version metadata and serves frontend assets with a version query string.
+The UI also shows backend/frontend version metadata, Docker image build commit/date, and serves frontend assets
+with a version query string. Use `make docker-build` instead of a raw `docker build` if you want build metadata
+to include the current git commit and UTC build time.
 
 ## Server Runbook
 

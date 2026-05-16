@@ -95,6 +95,11 @@ function formatTime(value) {
   return value ? new Date(value).toLocaleString() : "-";
 }
 
+function formatBuildDate(value) {
+  if (!value || value === "unknown") return "unknown date";
+  return new Date(value).toLocaleString();
+}
+
 function deployPolicyLabel(project) {
   if (!project?.deploy_mode || project.deploy_mode === "manual") return "manual";
   return `${project.deploy_mode} · ${project.deploy_source || "-"} · ${project.deploy_pattern_type || "-"} · ${project.deploy_pattern || "-"}`;
@@ -345,7 +350,7 @@ function renderTopbar() {
           ? "Webhook events"
           : "Environments dashboard";
   const versionText = state.version
-    ? `api ${state.version.backend_version || "-"} · ui ${state.version.frontend_version || "-"} · build ${shortCommit(state.version.build_commit)}`
+    ? `api ${state.version.backend_version || "-"} · ui ${state.version.frontend_version || "-"} · build ${shortCommit(state.version.build_commit)} · ${formatBuildDate(state.version.build_date)}`
     : "version loading";
   return `
     <header class="topbar">
