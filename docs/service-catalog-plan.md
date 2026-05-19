@@ -118,6 +118,15 @@ dev/tasktrack -> postgres-main database tasktrack_dev user tasktrack_dev
 prod/tasktrack -> postgres-main database tasktrack user tasktrack
 ```
 
+Current foundation:
+
+- `environment_resources` stores reusable resources owned by an environment, for example `dev/postgres-main`.
+- `project_resource_bindings` connects one environment project, and optionally one component, to a resource.
+- Binding outputs are rendered into the managed env file.
+- Binding mounts are rendered into the deployer-owned compose override.
+- The first implemented provider behavior is Postgres `DATABASE_URL` generation from resource and binding config.
+- Docker volume lifecycle is intentionally not provisioned yet, but volume mounts already use the same binding model.
+
 ## Source Repository Contract
 
 The deployer should not require modifying the original project.

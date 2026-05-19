@@ -311,3 +311,33 @@ def test_state_stores_project_components_endpoints_and_dependencies(tmp_path: Pa
     assert state.delete_endpoint("dev", "tasktrack", "api") is False
     assert state.delete_dependency("dev", "tasktrack", "postgres") is True
     assert state.delete_component("dev", "tasktrack", "backend") is True
+
+
+def test_state_stores_environment_resources_and_project_bindings(tmp_path: Path):
+    state = StateStore(tmp_path / "state.db")
+    state.add_project("dev", "tasktrack", "local", "/srv/tasktrack")
+    state.add_component("dev", "tasktrack", "backend", mode="compose", compose_service="app")
+
+    resource = state.add_environment_resource(
+        "dev",
+        "postgres-main",
+        "postgres",
+        config={"host": "postgres", "port": "5432"},
+    )
+    binding = state.add_project_resource_binding(
+        "dev",
+        "tasktrack",
+        "app-db",
+        "postgres-main",
+        component="backend",
+        outputs={"DATABASE_URL": "postgresql://example/tasktrack_dev"},
+        mounts=({"source": "dev_tasktrack_uploads", "target": "/app/uploads"},),
+    )
+
+    assert resource.type == "postgres"
+    assert state.list_environment_resources("dev")[0].config["host"] == "postgres"
+    assert binding.resource_name == "postgres-main"
+    assert binding.component == "backend"
+    assert binding.outputs["DATABASE_URL"].startswith("postgresql://")
+    assert binding.mounts[0]["target"] == "/app/uploads"
+    assert state.list_project_resource_bindings("dev", "tasktrack")[0].name == "app-db"

@@ -38,6 +38,14 @@ def main(argv: list[str] | None = None) -> int:
             state = StateStore(args.state_db)
             catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
             return _handle_dependencies(args, catalog)
+        if args.command == "resources":
+            state = StateStore(args.state_db)
+            catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+            return _handle_resources(args, catalog)
+        if args.command == "bindings":
+            state = StateStore(args.state_db)
+            catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
+            return _handle_bindings(args, catalog)
         if args.command == "env":
             state = StateStore(args.state_db)
             catalog = ServiceCatalog(state, runtime_dir=args.runtime_dir)
@@ -320,6 +328,8 @@ def _handle_projects(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
             )
         for dependency in config.dependencies:
             print(f"dependency: {dependency.name}\ttype={dependency.type}\ttarget={dependency.target}")
+        for binding in config.resource_bindings:
+            print(f"binding: {binding.name}\tresource={binding.resource_name}\tcomponent={binding.component or '-'}")
         return 0
     if args.projects_command == "remove":
         removed = catalog.remove_project(args.environment, args.name, delete_files=args.delete_files)
@@ -421,6 +431,49 @@ def _handle_dependencies(args: argparse.Namespace, catalog: ServiceCatalog) -> i
     raise DeployerError("Unknown dependencies command")
 
 
+def _handle_resources(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
+    if args.resources_command == "add":
+        resource = catalog.add_environment_resource(
+            args.environment,
+            args.name,
+            args.type,
+            config=_parse_assignments(args.config or []),
+        )
+        print(f"added\t{resource.environment}\t{resource.name}\t{resource.type}")
+        return 0
+    if args.resources_command == "list":
+        for resource in catalog.state.list_environment_resources(args.environment):
+            print(f"{resource.name}\ttype={resource.type}\tstatus={resource.status}")
+        return 0
+    raise DeployerError("Unknown resources command")
+
+
+def _handle_bindings(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
+    if args.bindings_command == "add":
+        binding = catalog.bind_project_resource(
+            args.environment,
+            args.project,
+            args.name,
+            args.resource,
+            component=args.component,
+            config=_parse_assignments(args.config or []),
+            outputs=_parse_assignments(args.output or []),
+            mounts=tuple(_parse_mount(value) for value in (args.mount or [])),
+        )
+        print(f"added\t{binding.environment}\t{binding.project}\t{binding.name}\tresource={binding.resource_name}")
+        return 0
+    if args.bindings_command == "list":
+        for binding in catalog.state.list_project_resource_bindings(args.environment, args.project):
+            outputs = ",".join(f"{key}={value}" for key, value in sorted(binding.outputs.items())) or "-"
+            mounts = ",".join(f"{item.get('source')}:{item.get('target')}" for item in binding.mounts) or "-"
+            print(
+                f"{binding.name}\tresource={binding.resource_name}\tcomponent={binding.component or '-'}\t"
+                f"outputs={outputs}\tmounts={mounts}"
+            )
+        return 0
+    raise DeployerError("Unknown bindings command")
+
+
 def _handle_environments(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
     if args.environments_command == "list":
         for profile in catalog.list_environment_profiles():
@@ -513,6 +566,17 @@ def _parse_assignments(assignments: list[str]) -> dict[str, str]:
             raise DeployerError("Assignment must use KEY=value format")
         values[key] = value
     return values
+
+
+def _parse_mount(value: str) -> dict:
+    source, sep, rest = value.partition(":")
+    if not sep:
+        raise DeployerError("Mount must use SOURCE:TARGET[:ro] format")
+    target, _, mode = rest.partition(":")
+    mount = {"source": source, "target": target, "type": "volume"}
+    if mode == "ro":
+        mount["read_only"] = True
+    return mount
 
 
 def _project_compose_files(args: argparse.Namespace) -> tuple[str, ...]:
@@ -787,6 +851,43 @@ def _parser() -> argparse.ArgumentParser:
     _add_catalog_options(dependencies_list)
     dependencies_list.add_argument("environment")
     dependencies_list.add_argument("project")
+
+    resources = subparsers.add_parser("resources")
+    resources.add_argument("--state-db", type=Path, default=config.state_db)
+    resources.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
+    resources_subparsers = resources.add_subparsers(dest="resources_command", required=True)
+
+    resources_add = resources_subparsers.add_parser("add")
+    _add_catalog_options(resources_add)
+    resources_add.add_argument("environment")
+    resources_add.add_argument("name")
+    resources_add.add_argument("--type", required=True)
+    resources_add.add_argument("--config", action="append")
+
+    resources_list = resources_subparsers.add_parser("list")
+    _add_catalog_options(resources_list)
+    resources_list.add_argument("environment")
+
+    bindings = subparsers.add_parser("bindings")
+    bindings.add_argument("--state-db", type=Path, default=config.state_db)
+    bindings.add_argument("--runtime-dir", type=Path, default=config.runtime_dir)
+    bindings_subparsers = bindings.add_subparsers(dest="bindings_command", required=True)
+
+    bindings_add = bindings_subparsers.add_parser("add")
+    _add_catalog_options(bindings_add)
+    bindings_add.add_argument("environment")
+    bindings_add.add_argument("project")
+    bindings_add.add_argument("name")
+    bindings_add.add_argument("--resource", required=True)
+    bindings_add.add_argument("--component")
+    bindings_add.add_argument("--config", action="append")
+    bindings_add.add_argument("--output", action="append")
+    bindings_add.add_argument("--mount", action="append")
+
+    bindings_list = bindings_subparsers.add_parser("list")
+    _add_catalog_options(bindings_list)
+    bindings_list.add_argument("environment")
+    bindings_list.add_argument("project")
 
     runtime_targets = subparsers.add_parser("runtime-targets")
     runtime_targets.add_argument("--state-db", type=Path, default=config.state_db)

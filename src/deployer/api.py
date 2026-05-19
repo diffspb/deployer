@@ -30,6 +30,7 @@ from deployer.state import (
     ProjectComponentRecord,
     ProjectDependencyRecord,
     ProjectEndpointRecord,
+    ProjectResourceBindingRecord,
     RuntimeStatusRecord,
     ServiceRecord,
     StateStore,
@@ -124,6 +125,21 @@ class AddDependencyRequest(BaseModel):
     type: str
     target: str
     outputs: dict[str, str] = Field(default_factory=dict)
+
+
+class AddEnvironmentResourceRequest(BaseModel):
+    name: str
+    type: str
+    config: dict = Field(default_factory=dict)
+
+
+class AddResourceBindingRequest(BaseModel):
+    name: str
+    resource_name: str
+    component: str | None = None
+    config: dict = Field(default_factory=dict)
+    outputs: dict[str, str] = Field(default_factory=dict)
+    mounts: list[dict] = Field(default_factory=list)
 
 
 def create_app(config: DeployerConfig | None = None) -> FastAPI:
@@ -249,6 +265,26 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         if not removed:
             raise HTTPException(status_code=404, detail=f"Unknown environment profile: {environment}")
         return {"removed": True, "environment": environment}
+
+    @app.get("/api/environments/{environment}/resources")
+    def list_environment_resources(environment: str, catalog: CatalogDep) -> dict:
+        catalog.get_environment_profile(environment)
+        return {
+            "environment": environment,
+            "resources": [
+                _environment_resource_payload(resource)
+                for resource in catalog.state.list_environment_resources(environment)
+            ],
+        }
+
+    @app.post("/api/environments/{environment}/resources", status_code=201)
+    def add_environment_resource(
+        environment: str,
+        payload: AddEnvironmentResourceRequest,
+        catalog: CatalogDep,
+    ) -> dict:
+        resource = catalog.add_environment_resource(environment, payload.name, payload.type, config=payload.config)
+        return {"resource": _environment_resource_payload(resource)}
 
     @app.get("/api/environments/{environment}/projects")
     def list_environment_projects(environment: str, catalog: CatalogDep) -> dict:
@@ -484,6 +520,25 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
         if not removed:
             raise HTTPException(status_code=404, detail=f"Unknown dependency: {dependency_name}")
         return {"removed": True, "dependency": dependency_name}
+
+    @app.post("/api/environments/{environment}/projects/{project}/resource-bindings", status_code=201)
+    def add_project_resource_binding(
+        environment: str,
+        project: str,
+        payload: AddResourceBindingRequest,
+        catalog: CatalogDep,
+    ) -> dict:
+        binding = catalog.bind_project_resource(
+            environment,
+            project,
+            payload.name,
+            payload.resource_name,
+            component=payload.component,
+            config=payload.config,
+            outputs=payload.outputs,
+            mounts=tuple(payload.mounts),
+        )
+        return {"binding": _resource_binding_payload(binding)}
 
     @app.get("/api/environments/{environment}/projects/{project}/preview")
     def project_preview(environment: str, project: str, catalog: CatalogDep) -> dict:
@@ -829,6 +884,7 @@ def _project_detail_payload(catalog: ServiceCatalog, environment: str, project: 
             for endpoint in config.endpoints
         ],
         "dependencies": [_dependency_payload(dependency) for dependency in config.dependencies],
+        "resource_bindings": [_resource_binding_payload(binding) for binding in config.resource_bindings],
     }
 
 
@@ -888,6 +944,36 @@ def _dependency_payload(dependency: ProjectDependencyRecord) -> dict:
         "outputs": dependency.outputs,
         "created_at": dependency.created_at,
         "updated_at": dependency.updated_at,
+    }
+
+
+def _environment_resource_payload(resource) -> dict:
+    return {
+        "id": resource.id,
+        "environment": resource.environment,
+        "name": resource.name,
+        "type": resource.type,
+        "config": resource.config,
+        "status": resource.status,
+        "created_at": resource.created_at,
+        "updated_at": resource.updated_at,
+    }
+
+
+def _resource_binding_payload(binding: ProjectResourceBindingRecord) -> dict:
+    return {
+        "id": binding.id,
+        "environment": binding.environment,
+        "project": binding.project,
+        "name": binding.name,
+        "resource_name": binding.resource_name,
+        "component": binding.component,
+        "config": binding.config,
+        "outputs": binding.outputs,
+        "mounts": list(binding.mounts),
+        "status": binding.status,
+        "created_at": binding.created_at,
+        "updated_at": binding.updated_at,
     }
 
 

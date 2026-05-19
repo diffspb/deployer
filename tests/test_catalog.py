@@ -6,6 +6,7 @@ import pytest
 from deployer.catalog import CatalogError, ServiceCatalog, render_env
 from deployer.errors import CommandError
 from deployer.engine import DeploymentEngine
+from deployer.project_spec import render_project_override
 from deployer.runner import CommandResult
 from deployer.state import StateStore
 
@@ -225,6 +226,40 @@ services:
     project = state.require_project("dev", "tasktrack")
     assert project.current_ref == "dev"
     assert project.last_deployment_id == result.deployment_id
+
+
+def test_catalog_resource_binding_generates_env_and_volume_mount(tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "docker-compose.yml").write_text("services:\n  app:\n    image: nginx:alpine\n")
+    state = StateStore(tmp_path / "state.db")
+    catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
+    catalog.add_project_local("dev", "tasktrack", source)
+    catalog.add_component("dev", "tasktrack", "backend", mode="compose", compose_service="app")
+
+    catalog.add_environment_resource(
+        "dev",
+        "postgres-main",
+        "postgres",
+        config={"host": "postgres", "port": "5432"},
+    )
+    catalog.bind_project_resource(
+        "dev",
+        "tasktrack",
+        "app-db",
+        "postgres-main",
+        component="backend",
+        config={"database": "tasktrack_dev", "username": "tasktrack_dev", "password": "secret"},
+        mounts=({"source": "dev_tasktrack_uploads", "target": "/app/uploads"},),
+    )
+
+    env_path = catalog.render_project_env_file("dev", "tasktrack")
+    spec = catalog.project_spec("dev", "tasktrack")
+    override = render_project_override(spec)
+
+    assert "DATABASE_URL=postgresql://tasktrack_dev:secret@postgres:5432/tasktrack_dev\n" == env_path.read_text()
+    assert "dev_tasktrack_uploads:/app/uploads" in override
+    assert "volumes:" in override
 
 
 def test_catalog_allows_same_project_name_in_different_environments(tmp_path: Path):

@@ -534,6 +534,74 @@ def test_cli_environment_project_workflow(tmp_path: Path, capsys):
     assert (
         main(
             [
+                "resources",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "add",
+                "dev",
+                "postgres-main",
+                "--type",
+                "postgres",
+                "--config",
+                "host=postgres",
+            ]
+        )
+        == 0
+    )
+    assert "postgres-main" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "bindings",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "add",
+                "dev",
+                "tasktrack",
+                "app-db",
+                "--resource",
+                "postgres-main",
+                "--component",
+                "backend",
+                "--config",
+                "database=tasktrack_dev",
+                "--config",
+                "username=tasktrack_dev",
+                "--config",
+                "password=secret",
+                "--mount",
+                "dev_tasktrack_uploads:/app/uploads",
+            ]
+        )
+        == 0
+    )
+    assert "app-db" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "bindings",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "list",
+                "dev",
+                "tasktrack",
+            ]
+        )
+        == 0
+    )
+    assert "DATABASE_URL=postgresql://tasktrack_dev:secret@postgres:5432/tasktrack_dev" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
                 "projects",
                 "--state-db",
                 str(state_db),

@@ -85,7 +85,11 @@
 - [x] Add GitHub webhook ingestion for environment project deploy policies.
 - [x] Implement `webhook_auto` for one configured environment project.
 - [x] Implement `webhook_gated` candidate storage and deploy.
-- [ ] Implement PostgreSQL dependency binding that can use one server with separate databases/users.
+- [x] Add extensible environment resource and project resource binding foundation.
+- [x] Implement initial Postgres binding env generation using one server with separate databases/users.
+- [x] Render resource binding volume mounts into generated compose overrides.
+- [ ] Add real Postgres provider provisioning for database/user/password creation.
+- [ ] Add Docker volume provider lifecycle management.
 
 ## Phase 2: Runtime Hardening
 

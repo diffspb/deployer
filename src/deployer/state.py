@@ -137,6 +137,35 @@ class ProjectDependencyRecord:
 
 
 @dataclass(frozen=True)
+class EnvironmentResourceRecord:
+    id: int
+    environment: str
+    name: str
+    type: str
+    config: dict
+    status: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class ProjectResourceBindingRecord:
+    id: int
+    project_id: int
+    environment: str
+    project: str
+    name: str
+    resource_name: str
+    component: str | None
+    config: dict
+    outputs: dict[str, str]
+    mounts: tuple[dict, ...]
+    status: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class JobRecord:
     id: int
     service: str
@@ -1106,6 +1135,154 @@ class StateStore:
             conn.execute("DELETE FROM project_dependencies WHERE id = ?", (dependency.id,))
         return True
 
+    def add_environment_resource(
+        self,
+        environment: str,
+        name: str,
+        type: str,
+        config: dict | None = None,
+        status: str = "active",
+    ) -> EnvironmentResourceRecord:
+        self.require_environment_profile(environment)
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO environment_resources(
+                    environment, name, type, config_json, status, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (environment, name, type, json.dumps(config or {}, sort_keys=True), status, now, now),
+            )
+        return self.require_environment_resource(environment, name)
+
+    def list_environment_resources(self, environment: str | None = None) -> list[EnvironmentResourceRecord]:
+        where = ""
+        params: list[object] = []
+        if environment is not None:
+            where = "WHERE environment = ?"
+            params.append(environment)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, environment, name, type, config_json, status, created_at, updated_at
+                FROM environment_resources
+                {where}
+                ORDER BY environment, name
+                """,
+                params,
+            ).fetchall()
+        return [_environment_resource_record(row) for row in rows]
+
+    def get_environment_resource(self, environment: str, name: str) -> EnvironmentResourceRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, environment, name, type, config_json, status, created_at, updated_at
+                FROM environment_resources
+                WHERE environment = ? AND name = ?
+                """,
+                (environment, name),
+            ).fetchone()
+        return _environment_resource_record(row) if row else None
+
+    def require_environment_resource(self, environment: str, name: str) -> EnvironmentResourceRecord:
+        resource = self.get_environment_resource(environment, name)
+        if resource is None:
+            raise KeyError(f"{environment}:{name}")
+        return resource
+
+    def add_project_resource_binding(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        resource_name: str,
+        component: str | None = None,
+        config: dict | None = None,
+        outputs: dict[str, str] | None = None,
+        mounts: tuple[dict, ...] = (),
+        status: str = "active",
+    ) -> ProjectResourceBindingRecord:
+        project_record = self.require_project(environment, project)
+        self.require_environment_resource(environment, resource_name)
+        if component is not None:
+            self.require_component(environment, project, component)
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO project_resource_bindings(
+                    project_id, name, resource_name, component, config_json, outputs_json,
+                    mounts_json, status, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_record.id,
+                    name,
+                    resource_name,
+                    component,
+                    json.dumps(config or {}, sort_keys=True),
+                    json.dumps(outputs or {}, sort_keys=True),
+                    json.dumps(list(mounts), sort_keys=True),
+                    status,
+                    now,
+                    now,
+                ),
+            )
+        return self.require_project_resource_binding(environment, project, name)
+
+    def list_project_resource_bindings(self, environment: str, project: str) -> list[ProjectResourceBindingRecord]:
+        project_record = self.require_project(environment, project)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT b.id, b.project_id, p.environment, p.name, b.name, b.resource_name,
+                       b.component, b.config_json, b.outputs_json, b.mounts_json,
+                       b.status, b.created_at, b.updated_at
+                FROM project_resource_bindings b
+                JOIN environment_projects p ON p.id = b.project_id
+                WHERE b.project_id = ?
+                ORDER BY b.name
+                """,
+                (project_record.id,),
+            ).fetchall()
+        return [_project_resource_binding_record(row) for row in rows]
+
+    def get_project_resource_binding(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+    ) -> ProjectResourceBindingRecord | None:
+        project_record = self.require_project(environment, project)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT b.id, b.project_id, p.environment, p.name, b.name, b.resource_name,
+                       b.component, b.config_json, b.outputs_json, b.mounts_json,
+                       b.status, b.created_at, b.updated_at
+                FROM project_resource_bindings b
+                JOIN environment_projects p ON p.id = b.project_id
+                WHERE b.project_id = ? AND b.name = ?
+                """,
+                (project_record.id, name),
+            ).fetchone()
+        return _project_resource_binding_record(row) if row else None
+
+    def require_project_resource_binding(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+    ) -> ProjectResourceBindingRecord:
+        binding = self.get_project_resource_binding(environment, project, name)
+        if binding is None:
+            raise KeyError(f"{environment}:{project}:{name}")
+        return binding
+
     def list_environments(self, service_name: str) -> list[EnvironmentRecord]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -1608,6 +1785,42 @@ class StateStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS environment_resources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    environment TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(environment, name),
+                    FOREIGN KEY(environment) REFERENCES environment_profiles(name) ON DELETE RESTRICT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS project_resource_bindings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    resource_name TEXT NOT NULL,
+                    component TEXT,
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    outputs_json TEXT NOT NULL DEFAULT '{}',
+                    mounts_json TEXT NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(project_id, name),
+                    FOREIGN KEY(project_id) REFERENCES environment_projects(id) ON DELETE CASCADE,
+                    FOREIGN KEY(project_id, component) REFERENCES project_components(project_id, name) ON DELETE CASCADE
+                )
+                """
+            )
 
 
 def _now() -> str:
@@ -1744,6 +1957,40 @@ def _project_dependency_record(row) -> ProjectDependencyRecord:
         outputs=json.loads(row[5] or "{}"),
         created_at=row[6],
         updated_at=row[7],
+    )
+
+
+def _environment_resource_record(row) -> EnvironmentResourceRecord:
+    return EnvironmentResourceRecord(
+        id=row[0],
+        environment=row[1],
+        name=row[2],
+        type=row[3],
+        config=json.loads(row[4] or "{}"),
+        status=row[5],
+        created_at=row[6],
+        updated_at=row[7],
+    )
+
+
+def _project_resource_binding_record(row) -> ProjectResourceBindingRecord:
+    mounts = json.loads(row[9] or "[]")
+    if not isinstance(mounts, list):
+        mounts = []
+    return ProjectResourceBindingRecord(
+        id=row[0],
+        project_id=row[1],
+        environment=row[2],
+        project=row[3],
+        name=row[4],
+        resource_name=row[5],
+        component=row[6],
+        config=json.loads(row[7] or "{}"),
+        outputs=json.loads(row[8] or "{}"),
+        mounts=tuple(item for item in mounts if isinstance(item, dict)),
+        status=row[10],
+        created_at=row[11],
+        updated_at=row[12],
     )
 
 

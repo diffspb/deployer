@@ -19,6 +19,7 @@ from deployer.state import (
     ProjectComponentRecord,
     ProjectDependencyRecord,
     ProjectEndpointRecord,
+    ProjectResourceBindingRecord,
     ServiceRecord,
     StateStore,
 )
@@ -80,6 +81,7 @@ class EnvironmentProjectConfig:
     components: tuple[ProjectComponentRecord, ...]
     endpoints: tuple[ProjectEndpointRecord, ...]
     dependencies: tuple[ProjectDependencyRecord, ...]
+    resource_bindings: tuple[ProjectResourceBindingRecord, ...]
 
 
 class CatalogError(DeployerError):
@@ -223,6 +225,7 @@ class ServiceCatalog:
             components=tuple(self.state.list_components(environment, name)),
             endpoints=tuple(self.state.list_endpoints(environment, name)),
             dependencies=tuple(self.state.list_dependencies(environment, name)),
+            resource_bindings=tuple(self.state.list_project_resource_bindings(environment, name)),
         )
 
     def add_component(
@@ -462,6 +465,69 @@ class ServiceCatalog:
         _validate_component_name(name)
         return self.state.delete_dependency(environment, project, name)
 
+    def add_environment_resource(
+        self,
+        environment: str,
+        name: str,
+        type: str,
+        config: dict | None = None,
+    ):
+        _validate_target_name(environment)
+        _validate_component_name(name)
+        if not type.strip():
+            raise CatalogError("Resource type must be non-empty")
+        try:
+            return self.state.add_environment_resource(environment, name, type, config=config)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown environment: {environment}") from exc
+        except sqlite3.IntegrityError as exc:
+            raise CatalogError(f"Environment resource already exists: {environment}/{name}") from exc
+
+    def bind_project_resource(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        resource_name: str,
+        component: str | None = None,
+        config: dict | None = None,
+        outputs: dict[str, str] | None = None,
+        mounts: tuple[dict, ...] = (),
+    ) -> ProjectResourceBindingRecord:
+        _validate_project_scope(environment, project)
+        _validate_component_name(name)
+        _validate_component_name(resource_name)
+        if component is not None:
+            _validate_component_name(component)
+        resolved_outputs = dict(outputs or {})
+        try:
+            resource = self.state.require_environment_resource(environment, resource_name)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown environment resource: {environment}/{resource_name}") from exc
+        if resource.type == "postgres":
+            resolved_outputs.update(_postgres_binding_outputs(resource.config, config or {}, resolved_outputs))
+        for key, value in resolved_outputs.items():
+            _validate_env_key(key)
+            if "\n" in value:
+                raise CatalogError("Resource binding outputs must be single-line")
+        for mount in mounts:
+            _validate_mount(mount)
+        try:
+            return self.state.add_project_resource_binding(
+                environment,
+                project,
+                name,
+                resource_name,
+                component=component,
+                config=config,
+                outputs=resolved_outputs,
+                mounts=mounts,
+            )
+        except KeyError as exc:
+            raise CatalogError(f"Unknown project resource binding target: {environment}/{project}/{resource_name}") from exc
+        except sqlite3.IntegrityError as exc:
+            raise CatalogError(f"Resource binding already exists: {environment}/{project}/{name}") from exc
+
     def set_project_env(self, environment: str, project: str, key: str, value: str) -> EnvironmentProjectRecord:
         _validate_project_scope(environment, project)
         _validate_env_key(key)
@@ -601,6 +667,7 @@ class ServiceCatalog:
             config.components,
             config.endpoints,
             config.dependencies,
+            config.resource_bindings,
             env_file=str(self.project_dir(environment, project_name) / "env" / "project.env"),
         )
 
@@ -1085,7 +1152,35 @@ def _project_runtime_env(config: EnvironmentProjectConfig) -> dict[str, str]:
     env_vars = dict(config.project.env_vars)
     for dependency in config.dependencies:
         env_vars.update(dependency.outputs)
+    for binding in config.resource_bindings:
+        env_vars.update(binding.outputs)
     return env_vars
+
+
+def _postgres_binding_outputs(resource_config: dict, binding_config: dict, explicit_outputs: dict[str, str]) -> dict[str, str]:
+    output_key = str(binding_config.get("output") or "DATABASE_URL")
+    if output_key in explicit_outputs:
+        return {}
+    host = binding_config.get("host") or resource_config.get("host")
+    database = binding_config.get("database")
+    username = binding_config.get("username")
+    password = binding_config.get("password")
+    if not all((host, database, username, password)):
+        return {}
+    port = binding_config.get("port") or resource_config.get("port") or 5432
+    scheme = binding_config.get("scheme") or resource_config.get("scheme") or "postgresql"
+    params = binding_config.get("params") or resource_config.get("params") or ""
+    suffix = f"?{params}" if params else ""
+    return {output_key: f"{scheme}://{username}:{password}@{host}:{port}/{database}{suffix}"}
+
+
+def _validate_mount(mount: dict) -> None:
+    source = str(mount.get("source") or "").strip()
+    target = str(mount.get("target") or "").strip()
+    if not source or not target:
+        raise CatalogError("Resource binding mounts must define source and target")
+    if not target.startswith("/"):
+        raise CatalogError("Resource binding mount target must be an absolute path")
 
 
 def _merge_logs(*parts: str) -> str:

@@ -13,6 +13,7 @@ from deployer.state import (
     ProjectComponentRecord,
     ProjectDependencyRecord,
     ProjectEndpointRecord,
+    ProjectResourceBindingRecord,
 )
 
 
@@ -47,6 +48,7 @@ class ComponentSpec:
     command: str | None
     port: int | None
     env_vars: dict[str, str]
+    mounts: tuple["MountSpec", ...] = ()
 
 
 @dataclass(frozen=True)
@@ -62,16 +64,27 @@ class EndpointSpec:
     healthcheck_path: str | None
 
 
+@dataclass(frozen=True)
+class MountSpec:
+    source: str
+    target: str
+    type: str = "volume"
+    read_only: bool = False
+    external: bool = False
+
+
 def build_project_spec(
     project: EnvironmentProjectRecord,
     profile: EnvironmentProfileRecord,
     components: tuple[ProjectComponentRecord, ...],
     endpoints: tuple[ProjectEndpointRecord, ...],
     dependencies: tuple[ProjectDependencyRecord, ...],
+    resource_bindings: tuple[ProjectResourceBindingRecord, ...] = (),
     env_file: str | None = None,
 ) -> ProjectSpec:
     del dependencies
-    component_specs = tuple(_component_spec(component) for component in components)
+    mounts_by_component = _mounts_by_component(resource_bindings)
+    component_specs = tuple(_component_spec(component, mounts_by_component.get(component.name, ())) for component in components)
     endpoint_specs = tuple(_endpoint_spec(endpoint) for endpoint in endpoints)
     return ProjectSpec(
         environment=project.environment,
@@ -87,6 +100,7 @@ def build_project_spec(
 
 def build_project_override(spec: ProjectSpec, platform: Platform = DEFAULT_PLATFORM) -> dict:
     services: dict[str, dict] = {}
+    volumes: dict[str, dict] = {}
     components_by_name = {component.name: component for component in spec.components}
     endpoints_by_component: dict[str, list[EndpointSpec]] = {}
     for endpoint in spec.endpoints:
@@ -100,12 +114,15 @@ def build_project_override(spec: ProjectSpec, platform: Platform = DEFAULT_PLATF
         if labels:
             service_config["labels"] = labels
         services[component.service] = service_config
+        for mount in component.mounts:
+            if mount.type == "volume":
+                volumes[mount.source] = {"external": True} if mount.external else {}
 
     for endpoint in spec.endpoints:
         if endpoint.component not in components_by_name:
             raise ValueError(f"Endpoint references unknown component: {endpoint.component}")
 
-    return {
+    override = {
         "services": services,
         "networks": {
             platform.network: {
@@ -113,6 +130,9 @@ def build_project_override(spec: ProjectSpec, platform: Platform = DEFAULT_PLATF
             },
         },
     }
+    if volumes:
+        override["volumes"] = volumes
+    return override
 
 
 def render_project_override(spec: ProjectSpec, platform: Platform = DEFAULT_PLATFORM) -> str:
@@ -176,7 +196,7 @@ def project_route_host(
     return f"{prefix}.{platform.domain}"
 
 
-def _component_spec(component: ProjectComponentRecord) -> ComponentSpec:
+def _component_spec(component: ProjectComponentRecord, mounts: tuple[MountSpec, ...] = ()) -> ComponentSpec:
     return ComponentSpec(
         name=component.name,
         service=component.compose_service or component.name,
@@ -187,6 +207,7 @@ def _component_spec(component: ProjectComponentRecord) -> ComponentSpec:
         command=component.command,
         port=component.port,
         env_vars=dict(component.env_vars),
+        mounts=mounts,
     )
 
 
@@ -221,7 +242,35 @@ def _base_service_config(component: ComponentSpec, spec: ProjectSpec, platform: 
         service_config["image"] = component.image
     if component.command:
         service_config["command"] = component.command
+    if component.mounts:
+        service_config["volumes"] = [_mount_value(mount) for mount in component.mounts]
     return service_config
+
+
+def _mounts_by_component(bindings: tuple[ProjectResourceBindingRecord, ...]) -> dict[str, tuple[MountSpec, ...]]:
+    grouped: dict[str, list[MountSpec]] = {}
+    for binding in bindings:
+        if not binding.component:
+            continue
+        for mount in binding.mounts:
+            spec = _mount_spec(mount)
+            grouped.setdefault(binding.component, []).append(spec)
+    return {component: tuple(mounts) for component, mounts in grouped.items()}
+
+
+def _mount_spec(raw: dict) -> MountSpec:
+    return MountSpec(
+        source=str(raw["source"]),
+        target=str(raw["target"]),
+        type=str(raw.get("type") or "volume"),
+        read_only=bool(raw.get("read_only") or raw.get("readonly")),
+        external=bool(raw.get("external")),
+    )
+
+
+def _mount_value(mount: MountSpec) -> str:
+    suffix = ":ro" if mount.read_only else ""
+    return f"{mount.source}:{mount.target}{suffix}"
 
 
 def _endpoint_labels(spec: ProjectSpec, endpoint: EndpointSpec, platform: Platform) -> list[str]:

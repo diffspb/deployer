@@ -43,6 +43,8 @@ POST   /api/environments
 GET    /api/environments/{environment}/services
 PATCH  /api/environments/{environment}
 DELETE /api/environments/{environment}
+GET    /api/environments/{environment}/resources
+POST   /api/environments/{environment}/resources
 GET    /api/environments/{environment}/projects
 POST   /api/environments/{environment}/projects
 GET    /api/environments/{environment}/projects/{project}
@@ -59,6 +61,7 @@ DELETE /api/environments/{environment}/projects/{project}/endpoints/{endpoint}
 POST   /api/environments/{environment}/projects/{project}/dependencies
 PATCH  /api/environments/{environment}/projects/{project}/dependencies/{dependency}
 DELETE /api/environments/{environment}/projects/{project}/dependencies/{dependency}
+POST   /api/environments/{environment}/projects/{project}/resource-bindings
 GET    /api/environments/{environment}/projects/{project}/preview
 POST   /api/environments/{environment}/projects/{project}/deploy
 POST   /api/environments/{environment}/projects/{project}/stop
@@ -139,6 +142,51 @@ updated by explicit status checks or successful runtime actions; the UI must not
 
 `GET /api/environments/{environment}/projects/{project}/status` executes `docker compose ps`, stores the parsed
 snapshot, and returns both the command result and the normalized `runtime_status`.
+
+Environment resources are reusable managed infrastructure objects owned by one environment. Project resource
+bindings connect a project, and optionally a component, to one resource. Bindings can produce runtime env vars and
+volume mounts. Legacy project `dependencies` are still supported for compatibility, but new resource work should use
+resources and bindings.
+
+Create a Postgres resource:
+
+```json
+{
+  "name": "postgres-main",
+  "type": "postgres",
+  "config": {
+    "host": "postgres",
+    "port": "5432"
+  }
+}
+```
+
+Bind a project to that resource:
+
+```json
+{
+  "name": "app-db",
+  "resource_name": "postgres-main",
+  "component": "backend",
+  "config": {
+    "database": "tasktrack_dev",
+    "username": "tasktrack_dev",
+    "password": "secret"
+  },
+  "outputs": {},
+  "mounts": [
+    {
+      "source": "dev_tasktrack_uploads",
+      "target": "/app/uploads",
+      "type": "volume"
+    }
+  ]
+}
+```
+
+For `postgres` bindings, `DATABASE_URL` is generated when `host`, `database`, `username`, and `password` are known.
+Explicit `outputs` can override generated values. Mounts are rendered into the deployer-owned compose override for
+the selected component.
 
 `healthcheck_path` is optional. When set, the UI shows it next to the public endpoint and stores it in the
 deployer-managed endpoint configuration.

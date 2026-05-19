@@ -585,6 +585,7 @@ function renderProjectConfig(project) {
   const components = project.components || [];
   const endpoints = project.endpoints || [];
   const dependencies = project.dependencies || [];
+  const resourceBindings = project.resource_bindings || [];
   const envEntries = Object.entries(project.env || {});
   return `
     <div class="config-grid">
@@ -657,6 +658,23 @@ function renderProjectConfig(project) {
           <input class="input" name="target" placeholder="target" required>
           <input class="input" name="output" placeholder="KEY=value">
           <button class="btn secondary" type="submit">${icon("plus")} Add</button>
+        </form>
+      </div>
+      <div class="preview-panel">
+        <div class="section-title">Resource Bindings</div>
+        ${resourceBindings.length ? resourceBindings.map((item) => `
+          <div class="fact compact">
+            <span class="fact-label">${escapeHtml(item.name)}</span>
+            <span class="fact-value mono">${escapeHtml(item.resource_name)} · component ${escapeHtml(item.component || "-")}</span>
+          </div>
+        `).join("") : `<div class="muted">No resource bindings.</div>`}
+        <form class="inline-form top-gap" onsubmit="addResourceBinding(event, ${js(project.environment)}, ${js(project.name)})">
+          <input class="input" name="name" placeholder="binding name" required>
+          <input class="input" name="resource_name" placeholder="resource name" required>
+          <input class="input" name="component" placeholder="component">
+          <input class="input" name="config" placeholder='config JSON, e.g. {"database":"app"}'>
+          <input class="input" name="output" placeholder="KEY=value">
+          <button class="btn secondary" type="submit">${icon("plus")} Bind</button>
         </form>
       </div>
     </div>
@@ -1142,6 +1160,40 @@ async function editDependency(environment, project, dependency) {
 async function deleteDependency(environment, project, dependency) {
   if (!confirm(`Delete dependency ${dependency}?`)) return;
   await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/dependencies/${encodeURIComponent(dependency)}`, { method: "DELETE" });
+  await refreshProject(environment, project);
+  render();
+}
+
+async function addResourceBinding(event, environment, project) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const output = String(form.get("output") || "").trim();
+  const outputs = {};
+  if (output.includes("=")) {
+    const [key, ...parts] = output.split("=");
+    outputs[key] = parts.join("=");
+  }
+  let config = {};
+  const configText = String(form.get("config") || "").trim();
+  if (configText) {
+    try {
+      config = JSON.parse(configText);
+    } catch (error) {
+      setToast(`Invalid config JSON: ${error.message}`);
+      return;
+    }
+  }
+  await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/resource-bindings`, {
+    method: "POST",
+    body: JSON.stringify({
+      name: String(form.get("name") || "").trim(),
+      resource_name: String(form.get("resource_name") || "").trim(),
+      component: String(form.get("component") || "").trim() || null,
+      config,
+      outputs,
+      mounts: [],
+    }),
+  });
   await refreshProject(environment, project);
   render();
 }
