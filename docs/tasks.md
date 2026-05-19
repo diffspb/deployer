@@ -88,8 +88,25 @@
 - [x] Add extensible environment resource and project resource binding foundation.
 - [x] Implement initial Postgres binding env generation using one server with separate databases/users.
 - [x] Render resource binding volume mounts into generated compose overrides.
+- [ ] Replace compatibility dependency UI with resource-first UI flows.
 - [ ] Add real Postgres provider provisioning for database/user/password creation.
 - [ ] Add Docker volume provider lifecycle management.
+- [ ] Add resource binding preview that clearly shows generated env vars and mounts before deploy.
+
+## Resource Providers
+
+- [x] Define environment resources as environment-owned objects.
+- [x] Define project resource bindings as project/component attachments.
+- [x] Support binding outputs as managed env vars.
+- [x] Support binding mounts as generated compose volumes.
+- [x] Add initial Postgres `DATABASE_URL` generation from resource and binding config.
+- [ ] Move resource secrets out of plain JSON config.
+- [ ] Add Postgres provider plan/apply flow: create database, create user, grant privileges, store generated output.
+- [ ] Add Postgres idempotency checks for existing database/user.
+- [ ] Add Postgres rotation story for generated passwords.
+- [ ] Add Docker volume provider plan/apply flow: create named volume, bind to component, protect from deletion.
+- [ ] Add explicit destructive confirmation model for resource deletion.
+- [ ] Add provider-level tests with fake adapters before touching real services.
 
 ## Phase 2: Runtime Hardening
 
@@ -128,8 +145,20 @@
 - [x] Add frontend asset cache-busting so updated UI is visible after deploy.
 - [x] Add cached runtime status snapshots updated by explicit status checks and successful runtime actions.
 - [x] Remove red failure styling from never-checked/unknown runtime status.
+- [x] Show resource bindings on the project configuration page.
+- [ ] Add environment resource management UI.
+- [ ] Replace prompt/basic forms for resource bindings with a guided resource binding wizard.
 - [ ] Replace manual status refresh with an event-driven status mechanism.
 - [ ] Add mobile navigation for small screens.
+
+## Near-Term Plan
+
+1. Verify resource bindings on the server with `paas-test-app`.
+2. Implement resource binding preview in UI/API so generated env vars and mounts are visible before deploy.
+3. Implement managed Postgres provider with a dry-run/plan mode first.
+4. Add secret storage or secret references before allowing provider-generated passwords in production.
+5. Implement Docker volume provider lifecycle after Postgres provider shape is proven.
+6. Remove or hide legacy `dependencies` from the main UI once resources/bindings cover the workflow.
 
 ## Runtime Targets v2
 

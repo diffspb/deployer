@@ -12,6 +12,15 @@ Environment -> Project -> Components -> Endpoints / Dependencies
 New UI work should use `/api/environments/{environment}/projects/{project}` operations. No compatibility
 migration is required for the development database.
 
+The current target resource model is resource-first:
+
+```text
+Environment Resource -> Project Resource Binding -> generated env vars / mounts
+```
+
+Legacy project `dependencies` are still present, but they are no longer the preferred extension point for managed
+resources.
+
 ## Configuration
 
 Runtime configuration is read from environment variables:
@@ -187,6 +196,13 @@ Bind a project to that resource:
 For `postgres` bindings, `DATABASE_URL` is generated when `host`, `database`, `username`, and `password` are known.
 Explicit `outputs` can override generated values. Mounts are rendered into the deployer-owned compose override for
 the selected component.
+
+Current limitations:
+
+- resource providers do not provision real infrastructure yet;
+- Postgres databases/users/passwords must already exist or be created manually;
+- Docker volumes are referenced in compose overrides but are not created/managed by deployer yet;
+- secrets are stored as plain config/output values until secret storage is implemented.
 
 `healthcheck_path` is optional. When set, the UI shows it next to the public endpoint and stores it in the
 deployer-managed endpoint configuration.

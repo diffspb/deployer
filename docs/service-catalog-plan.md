@@ -13,7 +13,8 @@ The target model is simpler:
 Environment
   Project
     Components
-    Dependencies
+    Endpoints
+    Resource bindings
     Deploy policy
 ```
 
@@ -38,7 +39,7 @@ It owns:
 - public Docker network;
 - default internal network policy;
 - deploy policy defaults;
-- managed components available to projects, for example shared PostgreSQL, Redis,
+- managed resources available to projects, for example shared PostgreSQL, Redis,
   RabbitMQ, or object storage;
 - future isolation settings.
 
@@ -98,9 +99,10 @@ Each component owns:
 The deployer must support multi-container repositories. A project can expose zero, one,
 or many public HTTP endpoints.
 
-### Dependencies
+### Resources and Bindings
 
-Dependencies describe resources used by the project.
+Resources describe managed or externally managed infrastructure available inside an environment.
+Bindings describe how one project uses one resource.
 
 Examples:
 
@@ -110,15 +112,15 @@ Examples:
 - S3/MinIO bucket or prefix;
 - external API credentials.
 
-The first implementation may materialize dependencies as env vars, but the model should
-not treat them as arbitrary text forever. The target direction is explicit bindings:
+The model should not treat dependencies as arbitrary text forever. The target direction is explicit resources
+and bindings:
 
 ```text
 dev/tasktrack -> postgres-main database tasktrack_dev user tasktrack_dev
 prod/tasktrack -> postgres-main database tasktrack user tasktrack
 ```
 
-Current foundation:
+Current implementation foundation:
 
 - `environment_resources` stores reusable resources owned by an environment, for example `dev/postgres-main`.
 - `project_resource_bindings` connects one environment project, and optionally one component, to a resource.
@@ -126,6 +128,15 @@ Current foundation:
 - Binding mounts are rendered into the deployer-owned compose override.
 - The first implemented provider behavior is Postgres `DATABASE_URL` generation from resource and binding config.
 - Docker volume lifecycle is intentionally not provisioned yet, but volume mounts already use the same binding model.
+
+Legacy `dependencies` still exist as a compatibility/manual-output mechanism. They should not be extended as the
+main resource abstraction.
+
+Provider responsibilities:
+
+- `postgres`: create or reference database/user/password, generate `DATABASE_URL`, later store secrets safely.
+- `volume`: create Docker volumes, render mounts, protect data from accidental deletion.
+- future providers: Redis namespace/database, RabbitMQ vhost, object storage bucket or prefix, external credentials.
 
 ## Source Repository Contract
 
@@ -155,7 +166,7 @@ Minimum project expectations:
    - use existing compose files; or
    - define generated compose components from build contexts and Dockerfiles.
 6. Operator configures public endpoints for selected components.
-7. Operator configures dependencies and env vars.
+7. Operator configures environment resources, project resource bindings, and env vars.
 8. Operator chooses deploy policy:
    - manual;
    - webhook auto;
@@ -194,6 +205,7 @@ Use the repository's existing compose files and generate deployer-owned override
 
 - inject managed env files;
 - inject high-priority `environment` values;
+- inject resource binding volume mounts;
 - attach public components to the Traefik network;
 - add Traefik labels for public endpoints;
 - keep source compose files read-only.
@@ -212,6 +224,7 @@ Generate the compose project from component definitions:
 - networks;
 - labels;
 - dependencies.
+- resource bindings.
 
 This allows deploying repositories that do not have a useful production compose file.
 
@@ -300,7 +313,12 @@ deployer components add dev tasktrack backend --build-context backend --dockerfi
 deployer components add dev tasktrack frontend --build-context frontend --dockerfile Dockerfile --port 3000
 deployer endpoints add dev tasktrack web frontend --port 3000 --subdomain tasktrack --auth sso
 deployer endpoints add dev tasktrack api backend --port 8000 --subdomain api.tasktrack --auth sso --health-path /api/v1/health
-deployer dependencies add dev tasktrack postgres --type postgres --target postgres-main/tasktrack_dev --output DATABASE_URL=postgresql://...
+
+deployer resources add dev postgres-main --type postgres --config host=postgres --config port=5432
+deployer bindings add dev tasktrack app-db --resource postgres-main --component backend \
+  --config database=tasktrack_dev --config username=tasktrack_dev --config password=<secret>
+deployer bindings add dev tasktrack uploads --resource docker-volumes --component backend \
+  --mount dev_tasktrack_uploads:/app/uploads
 
 deployer projects env-set dev tasktrack APP_ENV=dev
 deployer deploy dev tasktrack --ref dev
@@ -327,6 +345,9 @@ GET    /api/environments/{environment}
 PATCH  /api/environments/{environment}
 DELETE /api/environments/{environment}
 
+GET    /api/environments/{environment}/resources
+POST   /api/environments/{environment}/resources
+
 GET    /api/environments/{environment}/projects
 POST   /api/environments/{environment}/projects
 GET    /api/environments/{environment}/projects/{project}
@@ -346,6 +367,8 @@ DELETE /api/environments/{environment}/projects/{project}/endpoints/{endpoint}
 GET    /api/environments/{environment}/projects/{project}/env
 POST   /api/environments/{environment}/projects/{project}/env
 
+POST   /api/environments/{environment}/projects/{project}/resource-bindings
+
 POST   /api/environments/{environment}/projects/{project}/deploy
 POST   /api/environments/{environment}/projects/{project}/restart
 POST   /api/environments/{environment}/projects/{project}/stop
@@ -363,7 +386,7 @@ GET    /api/jobs
 
 1. Freeze this environment-first contract.
 2. Replace state schema with environments, projects, components, endpoints,
-   dependencies, env vars, jobs, deployments, webhook events.
+   dependencies/resource bindings, env vars, jobs, deployments, webhook events.
 3. Remove global services and service-to-environment attachment code.
 4. Refactor catalog/service layer into environment project operations.
 5. Refactor engine inputs so it deploys a resolved project spec, not only
@@ -378,6 +401,9 @@ GET    /api/jobs
 13. Implement webhook auto deploy for an environment project.
 14. Add gated candidate deploy.
 15. Add explicit dependency/resource binding model.
+16. Add managed Postgres provider provisioning.
+17. Add Docker volume provider lifecycle management.
+18. Replace compatibility dependencies in UI/CLI with resources and bindings.
 
 ## Near-Term Done Criteria
 
@@ -388,6 +414,7 @@ The refactor is ready when:
 - adding the same repository to two environments creates two independent projects;
 - a project can define multiple components;
 - a project can expose multiple public endpoints;
+- a project can bind to environment resources and receive generated env vars/mounts;
 - source repositories can be deployed without adding `deployer.yml`;
 - all runtime actions are addressed as `environment + project`;
 - CLI, API, and UI use the same model.

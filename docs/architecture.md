@@ -28,7 +28,7 @@ DeploymentEngine
 - One environment project can have only one active deployment.
 - Different environment projects may deploy concurrently later.
 - The same engine must be reusable from CLI and FastAPI.
-- The catalog owns environment/project/component/dependency state.
+- The catalog owns environment/project/component/endpoint/resource binding state.
 - The engine deploys a resolved project spec and does not know how sources are fetched.
 - The UI talks to the FastAPI API, not to Docker and not to engine internals.
 - Source repositories should not require deployer-specific files.
@@ -52,7 +52,11 @@ deployer projects remove dev myapp
 
 deployer components add dev myapp backend --build-context backend --dockerfile Dockerfile --port 8000
 deployer endpoints add dev myapp web backend --port 8000 --subdomain myapp --auth sso --health-path /health
-deployer dependencies add dev myapp postgres --type postgres --target postgres-main/myapp_dev --output DATABASE_URL=postgresql://...
+deployer resources add dev postgres-main --type postgres --config host=postgres --config port=5432
+deployer bindings add dev myapp app-db --resource postgres-main --component backend \
+  --config database=myapp_dev --config username=myapp_dev --config password=<secret>
+deployer bindings add dev myapp uploads --resource docker-volumes --component backend \
+  --mount dev_myapp_uploads:/app/uploads
 
 deployer projects env-list dev myapp
 deployer projects env-set dev myapp KEY=value
@@ -106,10 +110,11 @@ current: version=main	ref=main	commit=abc123	last_deployment=42
 Environment project mode:
 
 1. Resolve project by `environment + project` from SQLite.
-2. Resolve source, components, endpoints, dependencies, env vars, and deploy policy.
+2. Resolve source, components, endpoints, resource bindings, compatibility dependencies, env vars, and deploy policy.
 3. For git sources, fetch tags/branches and checkout requested ref.
 4. Build internal project spec. A repository-local `deployer.yml` may be imported, but is not required.
 5. Render managed env files and compose files/overrides under `/var/lib/deployer/environments/<environment>/projects/<project>/`.
+   Resource binding outputs become env vars; binding mounts become compose volume mounts.
 6. Run Docker Compose with BuildKit enabled.
 7. Run configured endpoint healthchecks.
 8. Store current version/ref/commit and deployment log.
@@ -131,7 +136,7 @@ Environment profiles are top-level operational boundaries. Operators can create 
 
 Projects are created inside environments. Creating a project in `dev` does not create anything in `prod`.
 If the same repository should run in both environments, it is added twice. This removes attach/detach ambiguity
-and makes deploy policy, env vars, dependencies, status, logs, and history unambiguously environment-scoped.
+and makes deploy policy, env vars, resource bindings, status, logs, and history unambiguously environment-scoped.
 
 Routing uses the profile `url_prefix`:
 
@@ -140,6 +145,28 @@ Routing uses the profile `url_prefix`:
 - `stage` -> `<subdomain>.stage.<domain>`
 
 Compose project names are environment-aware, for example `<environment>-<project>` or a sanitized equivalent.
+
+## Resource Model
+
+The current target resource model has two explicit layers:
+
+- `Environment Resource`: a reusable resource owned by one environment, for example `dev/postgres-main`.
+- `Project Resource Binding`: a project-level attachment to that resource, optionally scoped to one component.
+
+Bindings are the only place where project runtime inputs are produced from managed resources:
+
+- `outputs` are merged into the managed env file;
+- `mounts` are rendered into the deployer-owned compose override;
+- provider-specific behavior may generate outputs, for example Postgres `DATABASE_URL`.
+
+The initial Postgres behavior is intentionally conservative. It generates `DATABASE_URL` when the resource config
+and binding config contain enough data, but it does not yet create databases, users, passwords, or secrets.
+
+Docker volume mounts already use the same binding model, but volume lifecycle is not managed yet. A future volume
+provider must create volumes explicitly and must not delete data without a separate destructive confirmation flow.
+
+Legacy `dependencies` remain available for compatibility and manual env output injection, but new work should use
+resources and bindings.
 
 ## Future FastAPI UI
 
@@ -157,9 +184,11 @@ Initial UI screens:
 - Deploy button.
 - Live deployment log.
 - Rendered override preview.
+- Environment resources and project resource bindings.
 
 ## Security Notes
 
 The MVP CLI can use local Docker directly for development. The packaged service must use Docker socket proxy and a restricted operation set.
 
-Secrets should not be introduced before the engine is stable. The first version should prefer local projects with existing `.env.prod` files.
+Secrets should be separated from plain resource config before real provider provisioning is enabled. Until encrypted
+secret storage exists, generated examples may use plain values for testing only.
