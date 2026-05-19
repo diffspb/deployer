@@ -122,7 +122,8 @@ function activeJob(environment, project) {
 }
 
 function statusFor(environment, project) {
-  return state.runtimeStatus[projectKey(environment, project)] || {
+  const catalogProject = projectByName(environment, project);
+  return state.runtimeStatus[projectKey(environment, project)] || catalogProject?.runtime_status || {
     loading: false,
     state: "unknown",
     health: "unknown",
@@ -131,6 +132,9 @@ function statusFor(environment, project) {
 }
 
 function parseStatus(environment, project, response) {
+  if (response?.runtime_status) {
+    return { loading: false, ...response.runtime_status };
+  }
   const summary = response?.summary || {};
   const containers = Array.isArray(summary.containers) ? summary.containers : [];
   const states = containers.map((item) => item.state);
@@ -156,7 +160,7 @@ function renderRuntimeStatus(environment, project) {
     ? badge("success", "running")
     : status.state === "stopped"
       ? badge("", "stopped")
-      : badge("failed", "unknown");
+      : badge("", "unknown");
   const healthBadge = status.health === "healthy"
     ? badge("success", "healthy")
     : status.health === "unhealthy"
@@ -192,6 +196,7 @@ async function loadAll() {
       state.environments.map((environment) => api(`/api/environments/${encodeURIComponent(environment.name)}/projects`)),
     );
     state.projects = projectLists.flatMap((item) => item.projects || []);
+    syncRuntimeStatusFromProjects();
     state.loadError = "";
     syncCurrentView();
     if (state.currentView.name === "project") {
@@ -239,6 +244,8 @@ async function refreshStatus(environment, project) {
   try {
     const response = await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/status`);
     state.runtimeStatus[projectKey(environment, project)] = parseStatus(environment, project, response);
+    const catalogProject = projectByName(environment, project);
+    if (catalogProject) catalogProject.runtime_status = state.runtimeStatus[projectKey(environment, project)];
   } catch (error) {
     state.runtimeStatus[projectKey(environment, project)] = { loading: false, state: "unknown", health: "unknown", raw: error.message };
   }
@@ -949,6 +956,10 @@ async function openJob(id) {
   render();
   try {
     state.jobDrawer = await api(`/api/jobs/${id}?log_limit=120000`);
+    upsertJob(state.jobDrawer);
+    if (["success", "failed"].includes(state.jobDrawer.status)) {
+      await refreshProject(state.jobDrawer.environment, state.jobDrawer.project);
+    }
   } catch (error) {
     state.jobDrawer = {
       id,
@@ -1154,6 +1165,15 @@ async function refreshProject(environment, project) {
   const index = state.projects.findIndex((item) => item.environment === environment && item.name === project);
   if (index >= 0) state.projects[index] = detail;
   else state.projects.push(detail);
+  state.runtimeStatus[projectKey(environment, project)] = detail.runtime_status;
+}
+
+function syncRuntimeStatusFromProjects() {
+  state.projects.forEach((project) => {
+    if (project.runtime_status) {
+      state.runtimeStatus[projectKey(project.environment, project.name)] = project.runtime_status;
+    }
+  });
 }
 
 function setFilter(key, value) {

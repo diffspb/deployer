@@ -30,6 +30,7 @@ from deployer.state import (
     ProjectComponentRecord,
     ProjectDependencyRecord,
     ProjectEndpointRecord,
+    RuntimeStatusRecord,
     ServiceRecord,
     StateStore,
 )
@@ -562,7 +563,11 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
     @app.get("/api/environments/{environment}/projects/{project}/status")
     def status_environment_project(environment: str, project: str, context: ContextDep) -> dict:
         result = context.catalog.status_project(environment, project, context.engine)
-        return _command_result_payload(result)
+        runtime_status = _record_runtime_status_from_command(context.state, result)
+        return {
+            **_command_result_payload(result),
+            "runtime_status": _runtime_status_payload(runtime_status),
+        }
 
     @app.get("/api/environments/{environment}/projects/{project}/logs")
     def logs_environment_project(
@@ -783,6 +788,8 @@ def _environment_profile_payload(profile: EnvironmentProfileRecord, services: li
 def _project_payload(catalog: ServiceCatalog, project: EnvironmentProjectRecord) -> dict:
     config = catalog.project_config(project.environment, project.name)
     endpoints = [_endpoint_payload(catalog, project.environment, project.name, endpoint) for endpoint in config.endpoints]
+    runtime_status = catalog.state.get_runtime_status(project.environment, project.name)
+    latest_jobs = catalog.state.list_jobs(project.name, project.environment, limit=1)
     return {
         "id": project.id,
         "environment": project.environment,
@@ -804,6 +811,8 @@ def _project_payload(catalog: ServiceCatalog, project: EnvironmentProjectRecord)
         "candidate_ref": project.candidate_ref,
         "candidate_commit": project.candidate_commit,
         "candidate_event_id": project.candidate_event_id,
+        "runtime_status": _runtime_status_payload(runtime_status),
+        "last_job": _job_payload(latest_jobs[0], log_limit=0) if latest_jobs else None,
         "public_urls": [endpoint["public_url"] for endpoint in endpoints if endpoint["public_url"]],
         "created_at": project.created_at,
         "updated_at": project.updated_at,
@@ -964,14 +973,77 @@ def _history_payload(history) -> dict:
 
 
 def _command_result_payload(result) -> dict:
+    summary = _status_summary_payload(result.log) if result.status == "success" else None
     return {
         "project": result.project,
         "environment": result.environment,
         "status": result.status,
         "log": result.log,
         "override_path": str(result.override_path),
-        "summary": _status_summary_payload(result.log) if result.status == "success" else None,
+        "summary": summary,
     }
+
+
+def _runtime_status_payload(status: RuntimeStatusRecord | None) -> dict:
+    if status is None:
+        return {
+            "state": "unknown",
+            "health": "unknown",
+            "containers": [],
+            "raw": "",
+            "error": None,
+            "checked_at": None,
+        }
+    return {
+        "state": status.state,
+        "health": status.health,
+        "containers": list(status.containers),
+        "raw": status.raw,
+        "error": status.error,
+        "checked_at": status.checked_at,
+    }
+
+
+def _record_runtime_status_from_command(state: StateStore, result) -> RuntimeStatusRecord:
+    if result.status != "success":
+        return state.upsert_runtime_status(
+            result.environment,
+            result.project,
+            "unknown",
+            "unknown",
+            raw=result.log,
+            error=result.log or "status command failed",
+        )
+    summary = _status_summary_payload(result.log)
+    containers = tuple(summary.get("containers") or ())
+    states = {str(item.get("state") or "unknown").lower() for item in containers}
+    stopped_states = {"exited", "stopped", "dead", "created", "removing"}
+    if summary.get("running"):
+        runtime_state = "running"
+    elif containers and states.intersection(stopped_states):
+        runtime_state = "stopped"
+    elif not containers:
+        runtime_state = "stopped"
+    else:
+        runtime_state = "unknown"
+    return state.upsert_runtime_status(
+        result.environment,
+        result.project,
+        runtime_state,
+        str(summary.get("health") or "unknown"),
+        containers=containers,
+        raw=result.log,
+        error=None,
+    )
+
+
+def _record_runtime_status_from_action(state: StateStore, job: JobRecord, result) -> None:
+    if job.dry_run or result.status != "success":
+        return
+    if job.action in {"deploy", "restart"}:
+        state.upsert_runtime_status(job.environment, job.service, "running", "unknown", raw=result.log)
+    elif job.action in {"stop", "down"}:
+        state.upsert_runtime_status(job.environment, job.service, "stopped", "unknown", raw=result.log)
 
 
 def _preview_payload(catalog: ServiceCatalog, name: str, environment: str) -> dict:
@@ -1391,6 +1463,7 @@ def _run_runtime_job(config: DeployerConfig, job_id: int) -> None:
         else:
             raise RuntimeError(f"Unknown runtime action: {job.action}")
 
+        _record_runtime_status_from_action(context.state, job, result)
         context.state.finish_job(
             job_id,
             result.status,

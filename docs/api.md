@@ -104,6 +104,42 @@ Environment project endpoint payload:
 }
 ```
 
+Environment project payloads include the last known runtime snapshot. It is a cached operator view and is only
+updated by explicit status checks or successful runtime actions; the UI must not use global polling to keep it fresh.
+
+```json
+{
+  "environment": "dev",
+  "name": "tasktrack",
+  "current_ref": "dev",
+  "current_commit": "abc123",
+  "last_deployment_id": 42,
+  "runtime_status": {
+    "state": "running",
+    "health": "healthy",
+    "containers": [
+      {
+        "name": "dev-tasktrack-web-1",
+        "service": "web",
+        "state": "running",
+        "health": "healthy"
+      }
+    ],
+    "raw": "...",
+    "error": null,
+    "checked_at": "2026-05-19T10:00:00+00:00"
+  },
+  "last_job": {
+    "id": 42,
+    "action": "deploy",
+    "status": "success"
+  }
+}
+```
+
+`GET /api/environments/{environment}/projects/{project}/status` executes `docker compose ps`, stores the parsed
+snapshot, and returns both the command result and the normalized `runtime_status`.
+
 `healthcheck_path` is optional. When set, the UI shows it next to the public endpoint and stores it in the
 deployer-managed endpoint configuration.
 

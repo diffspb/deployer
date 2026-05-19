@@ -148,6 +148,31 @@ def test_state_tracks_runtime_jobs(tmp_path: Path):
     assert state.list_jobs(service="myapp")[0].id == job_id
 
 
+def test_state_stores_runtime_status_snapshot(tmp_path: Path):
+    state = StateStore(tmp_path / "state.db")
+
+    status = state.upsert_runtime_status(
+        "dev",
+        "tasktrack",
+        "running",
+        "healthy",
+        containers=({"name": "dev-tasktrack-app-1", "service": "app", "state": "running", "health": "healthy"},),
+        raw="[]",
+    )
+
+    assert status.environment == "dev"
+    assert status.project == "tasktrack"
+    assert status.state == "running"
+    assert status.health == "healthy"
+    assert status.containers[0]["service"] == "app"
+
+    updated = state.upsert_runtime_status("dev", "tasktrack", "stopped", "unknown", raw="")
+
+    assert updated.id == status.id
+    assert updated.state == "stopped"
+    assert state.require_runtime_status("dev", "tasktrack").health == "unknown"
+
+
 def test_state_stores_environment_scoped_projects(tmp_path: Path):
     state = StateStore(tmp_path / "state.db")
 

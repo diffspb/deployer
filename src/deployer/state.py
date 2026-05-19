@@ -155,6 +155,19 @@ class JobRecord:
 
 
 @dataclass(frozen=True)
+class RuntimeStatusRecord:
+    id: int
+    environment: str
+    project: str
+    state: str
+    health: str
+    containers: tuple[dict, ...]
+    raw: str
+    error: str | None
+    checked_at: str
+
+
+@dataclass(frozen=True)
 class WebhookEventRecord:
     id: int
     provider: str
@@ -291,6 +304,63 @@ class StateStore:
                 params,
             ).fetchall()
         return [_job_record(row) for row in rows]
+
+    def upsert_runtime_status(
+        self,
+        environment: str,
+        project: str,
+        state: str,
+        health: str,
+        containers: tuple[dict, ...] = (),
+        raw: str = "",
+        error: str | None = None,
+    ) -> RuntimeStatusRecord:
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO runtime_status(
+                    environment, project, state, health, containers_json, raw, error, checked_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(environment, project) DO UPDATE SET
+                    state = excluded.state,
+                    health = excluded.health,
+                    containers_json = excluded.containers_json,
+                    raw = excluded.raw,
+                    error = excluded.error,
+                    checked_at = excluded.checked_at
+                """,
+                (
+                    environment,
+                    project,
+                    state,
+                    health,
+                    json.dumps(list(containers), sort_keys=True),
+                    raw,
+                    error,
+                    now,
+                ),
+            )
+        return self.require_runtime_status(environment, project)
+
+    def get_runtime_status(self, environment: str, project: str) -> RuntimeStatusRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, environment, project, state, health, containers_json, raw, error, checked_at
+                FROM runtime_status
+                WHERE environment = ? AND project = ?
+                """,
+                (environment, project),
+            ).fetchone()
+        return _runtime_status_record(row) if row else None
+
+    def require_runtime_status(self, environment: str, project: str) -> RuntimeStatusRecord:
+        status = self.get_runtime_status(environment, project)
+        if status is None:
+            raise KeyError(f"{environment}:{project}")
+        return status
 
     def create_webhook_event(
         self,
@@ -1386,6 +1456,28 @@ class StateStore:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS runtime_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    environment TEXT NOT NULL,
+                    project TEXT NOT NULL,
+                    state TEXT NOT NULL DEFAULT 'unknown',
+                    health TEXT NOT NULL DEFAULT 'unknown',
+                    containers_json TEXT NOT NULL DEFAULT '[]',
+                    raw TEXT NOT NULL DEFAULT '',
+                    error TEXT,
+                    checked_at TEXT NOT NULL,
+                    UNIQUE(environment, project)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_runtime_status_scope
+                ON runtime_status(environment, project)
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS environment_projects (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     environment TEXT NOT NULL,
@@ -1586,6 +1678,23 @@ def _environment_project_record(row) -> EnvironmentProjectRecord:
         candidate_event_id=row[19],
         created_at=row[20],
         updated_at=row[21],
+    )
+
+
+def _runtime_status_record(row) -> RuntimeStatusRecord:
+    containers = json.loads(row[5] or "[]")
+    if not isinstance(containers, list):
+        containers = []
+    return RuntimeStatusRecord(
+        id=row[0],
+        environment=row[1],
+        project=row[2],
+        state=row[3],
+        health=row[4],
+        containers=tuple(item for item in containers if isinstance(item, dict)),
+        raw=row[6] or "",
+        error=row[7],
+        checked_at=row[8],
     )
 
 

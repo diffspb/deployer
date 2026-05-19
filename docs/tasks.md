@@ -122,6 +122,9 @@
 - [x] Expose backend and frontend versions through the API.
 - [x] Show backend/frontend versions in the Web UI header or system panel.
 - [x] Add frontend asset cache-busting so updated UI is visible after deploy.
+- [x] Add cached runtime status snapshots updated by explicit status checks and successful runtime actions.
+- [x] Remove red failure styling from never-checked/unknown runtime status.
+- [ ] Replace manual status refresh with an event-driven status mechanism.
 - [ ] Add mobile navigation for small screens.
 
 ## Runtime Targets v2
@@ -155,3 +158,5 @@
 - [ ] Docker commands are not user-editable free text.
 - [ ] Tests cover failure paths, not only happy paths.
 - [ ] API runtime operations do not block UI requests.
+- [x] UI does not use global status polling that resets active forms.
+- [x] API exposes normalized runtime state instead of forcing the UI to parse raw compose JSON.

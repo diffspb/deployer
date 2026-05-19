@@ -4,8 +4,10 @@ import hmac
 
 from fastapi.testclient import TestClient
 
-from deployer.api import _refs_payload, _status_summary_payload, create_app
+from deployer.api import _record_runtime_status_from_command, _refs_payload, _status_summary_payload, create_app
 from deployer.config import DeployerConfig
+from deployer.engine import CommandResult
+from deployer.state import StateStore
 
 
 def _project(path: Path) -> Path:
@@ -536,6 +538,30 @@ def test_api_parses_status_summary_payload_from_json_lines():
 
     assert summary["running"] is True
     assert summary["health"] == "healthy"
+
+
+def test_api_records_compact_runtime_status_from_compose_status(tmp_path: Path):
+    state = StateStore(tmp_path / "state.db")
+    result = CommandResult(
+        "tasktrack",
+        "dev",
+        "success",
+        '[{"Name":"dev-tasktrack-web-1","Service":"web","State":"running","Health":"healthy"}]\n',
+        tmp_path / "override.yml",
+    )
+
+    status = _record_runtime_status_from_command(state, result)
+
+    assert status.state == "running"
+    assert status.health == "healthy"
+    assert status.containers[0]["service"] == "web"
+
+    failed = _record_runtime_status_from_command(
+        state,
+        CommandResult("tasktrack", "dev", "failed", "docker error", tmp_path / "override.yml"),
+    )
+    assert failed.state == "unknown"
+    assert failed.error == "docker error"
 
 
 def json_bytes(payload: dict) -> bytes:
