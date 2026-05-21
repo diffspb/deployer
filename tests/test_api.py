@@ -295,6 +295,21 @@ services:
         "postgresql://tasktrack_dev:secret@postgres:5432/tasktrack_dev"
     )
 
+    response = client.get("/api/environments/dev/projects/tasktrack/resource-bindings/app-db/plan")
+    assert response.status_code == 200
+    assert response.json()["plan"]["binding"] == "app-db"
+    assert response.json()["plan"]["outputs"]["DATABASE_URL"] == (
+        "postgresql://tasktrack_dev:secret@postgres:5432/tasktrack_dev"
+    )
+
+    response = client.post(
+        "/api/environments/dev/projects/tasktrack/resource-bindings/app-db/apply",
+        json={"dry_run": True},
+    )
+    assert response.status_code == 200
+    assert response.json()["dry_run"] is True
+    assert "Dry run command:" in response.json()["log"]
+
     response = client.patch(
         "/api/environments/dev/projects/tasktrack/components/web",
         json={

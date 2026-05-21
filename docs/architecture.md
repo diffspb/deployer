@@ -159,8 +159,10 @@ Bindings are the only place where project runtime inputs are produced from manag
 - `mounts` are rendered into the deployer-owned compose override;
 - provider-specific behavior may generate outputs, for example Postgres `DATABASE_URL`.
 
-The initial Postgres behavior is intentionally conservative. It generates `DATABASE_URL` when the resource config
-and binding config contain enough data, but it does not yet create databases, users, passwords, or secrets.
+The Postgres provider supports plan/apply for project bindings. It derives default database/user names from
+`<environment>_<project>`, can generate a password, runs idempotent role/database/grant SQL through either
+`admin_dsn` or `docker exec <container> psql`, and stores the generated `DATABASE_URL` in binding outputs.
+Generated passwords are still stored as plain binding config until secret storage is implemented.
 
 Docker volume mounts already use the same binding model, but volume lifecycle is not managed yet. A future volume
 provider must create volumes explicitly and must not delete data without a separate destructive confirmation flow.

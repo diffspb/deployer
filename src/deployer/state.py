@@ -1283,6 +1283,40 @@ class StateStore:
             raise KeyError(f"{environment}:{project}:{name}")
         return binding
 
+    def update_project_resource_binding(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        config: dict | None = None,
+        outputs: dict[str, str] | None = None,
+        mounts: tuple[dict, ...] | None = None,
+        status: str | None = None,
+    ) -> ProjectResourceBindingRecord:
+        binding = self.require_project_resource_binding(environment, project, name)
+        next_config = binding.config if config is None else config
+        next_outputs = binding.outputs if outputs is None else outputs
+        next_mounts = binding.mounts if mounts is None else mounts
+        next_status = binding.status if status is None else status
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE project_resource_bindings
+                SET config_json = ?, outputs_json = ?, mounts_json = ?, status = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    json.dumps(next_config, sort_keys=True),
+                    json.dumps(next_outputs, sort_keys=True),
+                    json.dumps(list(next_mounts), sort_keys=True),
+                    next_status,
+                    now,
+                    binding.id,
+                ),
+            )
+        return self.require_project_resource_binding(environment, project, name)
+
     def list_environments(self, service_name: str) -> list[EnvironmentRecord]:
         with self._connect() as conn:
             rows = conn.execute(

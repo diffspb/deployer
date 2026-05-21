@@ -602,6 +602,45 @@ def test_cli_environment_project_workflow(tmp_path: Path, capsys):
     assert (
         main(
             [
+                "bindings",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "plan",
+                "dev",
+                "tasktrack",
+                "app-db",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "binding: dev/tasktrack/app-db" in output
+    assert "DATABASE_URL=postgresql://tasktrack_dev:secret@postgres:5432/tasktrack_dev" in output
+
+    assert (
+        main(
+            [
+                "bindings",
+                "--state-db",
+                str(state_db),
+                "--runtime-dir",
+                str(runtime_dir),
+                "apply",
+                "dev",
+                "tasktrack",
+                "app-db",
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    assert "Dry run command:" in capsys.readouterr().out
+
+    assert (
+        main(
+            [
                 "projects",
                 "--state-db",
                 str(state_db),

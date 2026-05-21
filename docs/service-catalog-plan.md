@@ -321,9 +321,11 @@ deployer components add dev tasktrack frontend --build-context frontend --docker
 deployer endpoints add dev tasktrack web frontend --port 3000 --subdomain tasktrack --auth sso
 deployer endpoints add dev tasktrack api backend --port 8000 --subdomain api.tasktrack --auth sso --health-path /api/v1/health
 
-deployer resources add dev postgres-main --type postgres --config host=postgres --config port=5432
+deployer resources add dev postgres-main --type postgres --config host=postgres --config port=5432 --config container=postgres
 deployer bindings add dev tasktrack app-db --resource postgres-main --component backend \
-  --config database=tasktrack_dev --config username=tasktrack_dev --config password=<secret>
+  --config database=tasktrack_dev
+deployer bindings plan dev tasktrack app-db
+deployer bindings apply dev tasktrack app-db
 deployer bindings add dev tasktrack uploads --resource docker-volumes --component backend \
   --mount dev_tasktrack_uploads:/app/uploads
 

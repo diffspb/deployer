@@ -471,6 +471,21 @@ def _handle_bindings(args: argparse.Namespace, catalog: ServiceCatalog) -> int:
                 f"outputs={outputs}\tmounts={mounts}"
             )
         return 0
+    if args.bindings_command == "plan":
+        plan = catalog.plan_project_resource_binding(args.environment, args.project, args.name)
+        _print_resource_plan(plan)
+        return 0
+    if args.bindings_command == "apply":
+        plan, log = catalog.apply_project_resource_binding(
+            args.environment,
+            args.project,
+            args.name,
+            dry_run=args.dry_run,
+        )
+        _print_resource_plan(plan)
+        if log:
+            print(log)
+        return 0
     raise DeployerError("Unknown bindings command")
 
 
@@ -556,6 +571,25 @@ def _format_history_record(record) -> str:
         f"{record.id}\t{record.environment}\t{record.action}\t"
         f"{record.status}\t{record.version or '-'}\t{record.started_at}"
     )
+
+
+def _print_resource_plan(plan) -> None:
+    print(f"binding: {plan.environment}/{plan.project}/{plan.binding}")
+    print(f"resource: {plan.resource}\ttype={plan.resource_type}")
+    print("config:")
+    for key, value in sorted(plan.config.items()):
+        safe_value = "***" if key == "password" and value else value
+        print(f"  {key}={safe_value}")
+    print("outputs:")
+    for key, value in sorted(plan.outputs.items()):
+        print(f"  {key}={value}")
+    print("steps:")
+    for step in plan.steps:
+        print(f"  - {step}")
+    if plan.warnings:
+        print("warnings:")
+        for warning in plan.warnings:
+            print(f"  - {warning}")
 
 
 def _parse_assignments(assignments: list[str]) -> dict[str, str]:
@@ -888,6 +922,19 @@ def _parser() -> argparse.ArgumentParser:
     _add_catalog_options(bindings_list)
     bindings_list.add_argument("environment")
     bindings_list.add_argument("project")
+
+    bindings_plan = bindings_subparsers.add_parser("plan")
+    _add_catalog_options(bindings_plan)
+    bindings_plan.add_argument("environment")
+    bindings_plan.add_argument("project")
+    bindings_plan.add_argument("name")
+
+    bindings_apply = bindings_subparsers.add_parser("apply")
+    _add_catalog_options(bindings_apply)
+    bindings_apply.add_argument("environment")
+    bindings_apply.add_argument("project")
+    bindings_apply.add_argument("name")
+    bindings_apply.add_argument("--dry-run", action="store_true")
 
     runtime_targets = subparsers.add_parser("runtime-targets")
     runtime_targets.add_argument("--state-db", type=Path, default=config.state_db)

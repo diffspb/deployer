@@ -75,6 +75,8 @@ POST   /api/environments/{environment}/projects/{project}/dependencies
 PATCH  /api/environments/{environment}/projects/{project}/dependencies/{dependency}
 DELETE /api/environments/{environment}/projects/{project}/dependencies/{dependency}
 POST   /api/environments/{environment}/projects/{project}/resource-bindings
+GET    /api/environments/{environment}/projects/{project}/resource-bindings/{binding}/plan
+POST   /api/environments/{environment}/projects/{project}/resource-bindings/{binding}/apply
 GET    /api/environments/{environment}/projects/{project}/preview
 POST   /api/environments/{environment}/projects/{project}/deploy
 POST   /api/environments/{environment}/projects/{project}/stop
@@ -169,10 +171,20 @@ Create a Postgres resource:
   "type": "postgres",
   "config": {
     "host": "postgres",
-    "port": "5432"
+    "port": "5432",
+    "container": "postgres",
+    "admin_user": "postgres"
   }
 }
 ```
+
+Provisioning connection options:
+
+- `admin_dsn`: run local `psql -d <admin_dsn> ...`; use `{database}` placeholder if the DSN must switch databases
+  for schema grants;
+- `container` plus optional `admin_user` and `admin_database`: run `docker exec <container> psql ...`.
+
+`host` and `port` are still the application-facing connection target used in generated `DATABASE_URL`.
 
 Bind a project to that resource:
 
@@ -181,11 +193,7 @@ Bind a project to that resource:
   "name": "app-db",
   "resource_name": "postgres-main",
   "component": "backend",
-  "config": {
-    "database": "tasktrack_dev",
-    "username": "tasktrack_dev",
-    "password": "secret"
-  },
+  "config": {},
   "outputs": {},
   "mounts": [
     {
@@ -197,14 +205,31 @@ Bind a project to that resource:
 }
 ```
 
-For `postgres` bindings, `DATABASE_URL` is generated when `host`, `database`, `username`, and `password` are known.
+For `postgres` bindings, `plan/apply` derives default `database` and `username` from
+`<environment>_<project>`, generates a password when missing, creates/updates the role, creates the database if it
+does not exist, grants privileges, and stores the generated `DATABASE_URL` in binding outputs. Explicit binding
+`config` can override `database`, `username`, `password`, `output`, `scheme`, `host`, `port`, and `params`.
 Explicit `outputs` can override generated values. Mounts are rendered into the deployer-owned compose override for
 the selected component.
 
+Plan/apply:
+
+```text
+GET  /api/environments/dev/projects/tasktrack/resource-bindings/app-db/plan
+POST /api/environments/dev/projects/tasktrack/resource-bindings/app-db/apply
+```
+
+Apply request:
+
+```json
+{
+  "dry_run": false
+}
+```
+
 Current limitations:
 
-- resource providers do not provision real infrastructure yet;
-- Postgres databases/users/passwords must already exist or be created manually;
+- Postgres provider stores generated passwords as plain binding config until secret storage is implemented;
 - Docker volumes are referenced in compose overrides but are not created/managed by deployer yet;
 - secrets are stored as plain config/output values until secret storage is implemented.
 

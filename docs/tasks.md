@@ -89,7 +89,7 @@
 - [x] Implement initial Postgres binding env generation using one server with separate databases/users.
 - [x] Render resource binding volume mounts into generated compose overrides.
 - [x] Replace compatibility dependency UI with resource-first UI flows.
-- [ ] Add real Postgres provider provisioning for database/user/password creation.
+- [x] Add real Postgres provider provisioning for database/user/password creation.
 - [ ] Add Docker volume provider lifecycle management.
 - [x] Add resource binding preview that clearly shows generated env vars and mounts before deploy.
 
@@ -101,12 +101,12 @@
 - [x] Support binding mounts as generated compose volumes.
 - [x] Add initial Postgres `DATABASE_URL` generation from resource and binding config.
 - [ ] Move resource secrets out of plain JSON config.
-- [ ] Add Postgres provider plan/apply flow: create database, create user, grant privileges, store generated output.
-- [ ] Add Postgres idempotency checks for existing database/user.
+- [x] Add Postgres provider plan/apply flow: create database, create user, grant privileges, store generated output.
+- [x] Add Postgres idempotency checks for existing database/user.
 - [ ] Add Postgres rotation story for generated passwords.
 - [ ] Add Docker volume provider plan/apply flow: create named volume, bind to component, protect from deletion.
 - [ ] Add explicit destructive confirmation model for resource deletion.
-- [ ] Add provider-level tests with fake adapters before touching real services.
+- [x] Add provider-level tests with fake adapters before touching real services.
 
 ## Phase 2: Runtime Hardening
 
@@ -156,7 +156,7 @@
 ## Near-Term Plan
 
 1. Verify resource bindings on the server with `paas-test-app`.
-2. Implement managed Postgres provider with a dry-run/plan mode first.
+2. Verify managed Postgres provider on the server with a disposable project database.
 3. Add secret storage or secret references before allowing provider-generated passwords in production.
 4. Implement Docker volume provider lifecycle after Postgres provider shape is proven.
 5. Replace prompt/basic forms for resource bindings with a guided wizard.

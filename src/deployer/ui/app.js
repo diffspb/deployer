@@ -14,6 +14,7 @@ const state = {
   logsDrawer: null,
   jobDrawer: null,
   previewDrawer: null,
+  resourcePlanDrawer: null,
   runtimeStatus: {},
   filters: {
     query: "",
@@ -325,6 +326,7 @@ function render() {
       ${state.logsDrawer ? renderLogsDrawer() : ""}
       ${state.jobDrawer ? renderJobDrawer() : ""}
       ${state.previewDrawer ? renderPreviewDrawer() : ""}
+      ${state.resourcePlanDrawer ? renderResourcePlanDrawer() : ""}
       ${state.toast ? `<div class="toast">${escapeHtml(state.toast)}</div>` : ""}
     </div>
   `;
@@ -689,6 +691,11 @@ function renderProjectConfig(project) {
           <div class="fact compact">
             <span class="fact-label">${escapeHtml(item.name)}</span>
             <span class="fact-value mono">${escapeHtml(item.resource_name)} · component ${escapeHtml(item.component || "-")}</span>
+            <span class="fact-actions">
+              <button class="link-btn" onclick="planResourceBinding(${js(project.environment)}, ${js(project.name)}, ${js(item.name)})">Plan</button>
+              <button class="link-btn" onclick="applyResourceBinding(${js(project.environment)}, ${js(project.name)}, ${js(item.name)}, true)">Dry-run</button>
+              <button class="link-btn" onclick="applyResourceBinding(${js(project.environment)}, ${js(project.name)}, ${js(item.name)}, false)">Apply</button>
+            </span>
           </div>
           ${renderKeyValueList(item.outputs, "Generated env")}
           ${renderMountList(item.mounts)}
@@ -922,6 +929,36 @@ function renderPreviewDrawer() {
       </div>
     </aside>
   `;
+}
+
+function renderResourcePlanDrawer() {
+  const plan = state.resourcePlanDrawer.plan || {};
+  const log = state.resourcePlanDrawer.log || "";
+  return `
+    <div class="drawer-backdrop" onclick="closeResourcePlan()"></div>
+    <aside class="drawer wide-drawer">
+      <div class="drawer-head">
+        <div><div class="section-title">Resource plan ${escapeHtml(plan.environment || "")}/${escapeHtml(plan.project || "")}/${escapeHtml(plan.binding || "")}</div><div class="muted">Managed resource provisioning plan/apply output.</div></div>
+        <button class="btn ghost" onclick="closeResourcePlan()">${icon("close")}</button>
+      </div>
+      ${state.resourcePlanDrawer.error ? renderError(state.resourcePlanDrawer.error) : ""}
+      <div class="preview-panel">
+        <div class="section-title">Config</div>
+        ${renderKeyValueList(maskSecretValues(plan.config || {}), "Resolved config")}
+        ${renderKeyValueList(plan.outputs || {}, "Outputs")}
+      </div>
+      <div class="preview-panel top-gap">
+        <div class="section-title">Steps</div>
+        ${plan.steps?.length ? plan.steps.map((step) => `<div class="fact compact"><span class="fact-value">${escapeHtml(step)}</span></div>`).join("") : `<div class="muted">No plan loaded.</div>`}
+        ${plan.warnings?.length ? `<div class="inline-error top-gap"><div class="error-title">Warnings</div><div class="error-list">${plan.warnings.map((warning) => `<div>${escapeHtml(warning)}</div>`).join("")}</div></div>` : ""}
+      </div>
+      ${log ? `<div class="preview-panel top-gap"><div class="section-title">Output</div><pre class="log-box">${escapeHtml(log)}</pre></div>` : ""}
+    </aside>
+  `;
+}
+
+function maskSecretValues(values) {
+  return Object.fromEntries(Object.entries(values || {}).map(([key, value]) => [key, key.toLowerCase().includes("password") ? "***" : value]));
 }
 
 function renderEmpty(message = "Nothing here yet") {
@@ -1351,6 +1388,40 @@ async function openPreview(environment, project) {
 
 function closePreview() {
   state.previewDrawer = null;
+  render();
+}
+
+async function planResourceBinding(environment, project, binding) {
+  state.resourcePlanDrawer = { plan: { environment, project, binding }, log: "Loading plan..." };
+  render();
+  try {
+    const response = await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/resource-bindings/${encodeURIComponent(binding)}/plan`);
+    state.resourcePlanDrawer = { plan: response.plan, log: "" };
+  } catch (error) {
+    state.resourcePlanDrawer = { plan: { environment, project, binding }, error: error.message };
+  }
+  render();
+}
+
+async function applyResourceBinding(environment, project, binding, dryRun) {
+  if (!dryRun && !confirm(`Apply managed resource binding ${environment}/${project}/${binding}?`)) return;
+  state.resourcePlanDrawer = { plan: { environment, project, binding }, log: dryRun ? "Running dry-run..." : "Applying..." };
+  render();
+  try {
+    const response = await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/resource-bindings/${encodeURIComponent(binding)}/apply`, {
+      method: "POST",
+      body: JSON.stringify({ dry_run: dryRun }),
+    });
+    state.resourcePlanDrawer = { plan: response.plan, log: response.log || "" };
+    if (!dryRun) await refreshProject(environment, project);
+  } catch (error) {
+    state.resourcePlanDrawer = { plan: { environment, project, binding }, error: error.message };
+  }
+  render();
+}
+
+function closeResourcePlan() {
+  state.resourcePlanDrawer = null;
   render();
 }
 

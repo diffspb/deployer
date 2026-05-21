@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 import shutil
 import sqlite3
 from dataclasses import dataclass
@@ -82,6 +83,20 @@ class EnvironmentProjectConfig:
     endpoints: tuple[ProjectEndpointRecord, ...]
     dependencies: tuple[ProjectDependencyRecord, ...]
     resource_bindings: tuple[ProjectResourceBindingRecord, ...]
+
+
+@dataclass(frozen=True)
+class ResourceProvisionPlan:
+    environment: str
+    project: str
+    binding: str
+    resource: str
+    resource_type: str
+    config: dict
+    outputs: dict[str, str]
+    steps: tuple[str, ...]
+    commands: tuple[tuple[str, ...], ...]
+    warnings: tuple[str, ...] = ()
 
 
 class CatalogError(DeployerError):
@@ -527,6 +542,108 @@ class ServiceCatalog:
             raise CatalogError(f"Unknown project resource binding target: {environment}/{project}/{resource_name}") from exc
         except sqlite3.IntegrityError as exc:
             raise CatalogError(f"Resource binding already exists: {environment}/{project}/{name}") from exc
+
+    def plan_project_resource_binding(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+    ) -> ResourceProvisionPlan:
+        _validate_project_scope(environment, project)
+        _validate_component_name(name)
+        try:
+            binding = self.state.require_project_resource_binding(environment, project, name)
+            resource = self.state.require_environment_resource(environment, binding.resource_name)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown resource binding: {environment}/{project}/{name}") from exc
+        if resource.type != "postgres":
+            raise CatalogError(f"Managed provisioning is not supported for resource type: {resource.type}")
+        config = _managed_postgres_config(environment, project, binding)
+        outputs = {
+            **binding.outputs,
+            **_postgres_binding_outputs(resource.config, config, binding.outputs),
+        }
+        commands = _postgres_provision_commands(resource.config, config)
+        warnings = []
+        if not _postgres_admin_mode(resource.config):
+            warnings.append("Postgres resource must define admin_dsn or container before apply can run")
+        if not config.get("password"):
+            warnings.append("Password will be generated during apply and stored in binding config until secret storage exists")
+        return ResourceProvisionPlan(
+            environment=environment,
+            project=project,
+            binding=name,
+            resource=resource.name,
+            resource_type=resource.type,
+            config=config,
+            outputs=outputs,
+            steps=(
+                f"ensure role {config['username']} exists",
+                f"ensure database {config['database']} exists",
+                f"grant database privileges on {config['database']} to {config['username']}",
+                f"store generated outputs on binding {environment}/{project}/{name}",
+            ),
+            commands=commands,
+            warnings=tuple(warnings),
+        )
+
+    def apply_project_resource_binding(
+        self,
+        environment: str,
+        project: str,
+        name: str,
+        dry_run: bool = False,
+    ) -> tuple[ResourceProvisionPlan, str]:
+        try:
+            binding = self.state.require_project_resource_binding(environment, project, name)
+            resource = self.state.require_environment_resource(environment, binding.resource_name)
+        except KeyError as exc:
+            raise CatalogError(f"Unknown resource binding: {environment}/{project}/{name}") from exc
+        if resource.type != "postgres":
+            raise CatalogError(f"Managed provisioning is not supported for resource type: {resource.type}")
+        config = _managed_postgres_config(environment, project, binding, generate_password=True)
+        outputs = {
+            **binding.outputs,
+            **_postgres_binding_outputs(resource.config, config, binding.outputs),
+        }
+        commands = _postgres_provision_commands(resource.config, config)
+        plan = ResourceProvisionPlan(
+            environment=environment,
+            project=project,
+            binding=name,
+            resource=resource.name,
+            resource_type=resource.type,
+            config=config,
+            outputs=outputs,
+            steps=(
+                f"ensure role {config['username']} exists",
+                f"ensure database {config['database']} exists",
+                f"grant database privileges on {config['database']} to {config['username']}",
+                f"store generated outputs on binding {environment}/{project}/{name}",
+            ),
+            commands=commands,
+        )
+        log_lines = [f"Plan: {step}" for step in plan.steps]
+        if dry_run:
+            log_lines.extend(f"Dry run command: {' '.join(command)}" for command in commands)
+            return plan, "\n".join(log_lines)
+        if not _postgres_admin_mode(resource.config):
+            raise CatalogError("Postgres resource must define admin_dsn or container before apply can run")
+        for command in commands:
+            result = self.runner.run(command, cwd=self.runtime_dir)
+            if result.output.strip():
+                log_lines.append(result.output.strip())
+        self.state.update_project_resource_binding(
+            environment,
+            project,
+            name,
+            config=config,
+            outputs=outputs,
+            mounts=binding.mounts,
+            status="active",
+        )
+        log_lines.append(f"updated binding {environment}/{project}/{name}")
+        return plan, "\n".join(log_lines)
 
     def set_project_env(self, environment: str, project: str, key: str, value: str) -> EnvironmentProjectRecord:
         _validate_project_scope(environment, project)
@@ -1175,6 +1292,120 @@ def _postgres_binding_outputs(resource_config: dict, binding_config: dict, expli
     params = binding_config.get("params") or resource_config.get("params") or ""
     suffix = f"?{params}" if params else ""
     return {output_key: f"{scheme}://{username}:{password}@{host}:{port}/{database}{suffix}"}
+
+
+def _managed_postgres_config(
+    environment: str,
+    project: str,
+    binding: ProjectResourceBindingRecord,
+    generate_password: bool = False,
+) -> dict:
+    config = dict(binding.config)
+    default_name = _postgres_safe_name(f"{environment}_{project}")
+    config.setdefault("database", default_name)
+    config.setdefault("username", default_name)
+    if generate_password and not config.get("password"):
+        config["password"] = secrets.token_urlsafe(24)
+    return config
+
+
+def _postgres_provision_commands(resource_config: dict, binding_config: dict) -> tuple[tuple[str, ...], ...]:
+    database = str(binding_config["database"])
+    username = str(binding_config["username"])
+    password = str(binding_config.get("password") or "<generated-on-apply>")
+    admin_database = str(resource_config.get("admin_database") or resource_config.get("database") or "postgres")
+    commands = [
+        _postgres_admin_command(resource_config, admin_database, _postgres_role_sql(username, password)),
+        _postgres_admin_command(resource_config, admin_database, _postgres_database_sql(database, username)),
+        _postgres_admin_command(resource_config, database, _postgres_grants_sql(database, username)),
+    ]
+    return tuple(command for command in commands if command)
+
+
+def _postgres_admin_mode(resource_config: dict) -> str | None:
+    if resource_config.get("admin_dsn"):
+        return "dsn"
+    if resource_config.get("container"):
+        return "container"
+    return None
+
+
+def _postgres_admin_command(resource_config: dict, database: str, sql: str) -> tuple[str, ...]:
+    if resource_config.get("admin_dsn"):
+        return (
+            "psql",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-d",
+            _postgres_connection_string(resource_config, database),
+            "-c",
+            sql,
+        )
+    container = str(resource_config.get("container") or "<postgres-container>")
+    admin_user = str(resource_config.get("admin_user") or "postgres")
+    return (
+        "docker",
+        "exec",
+        container,
+        "psql",
+        "-U",
+        admin_user,
+        "-d",
+        database,
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        sql,
+    )
+
+
+def _postgres_role_sql(username: str, password: str) -> str:
+    return (
+        "DO $$ BEGIN "
+        f"IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {_sql_literal(username)}) THEN "
+        f"CREATE ROLE {_sql_ident(username)} LOGIN PASSWORD {_sql_literal(password)}; "
+        "ELSE "
+        f"ALTER ROLE {_sql_ident(username)} WITH LOGIN PASSWORD {_sql_literal(password)}; "
+        "END IF; END $$;"
+    )
+
+
+def _postgres_connection_string(resource_config: dict, database: str) -> str:
+    dsn = str(resource_config["admin_dsn"])
+    if "{database}" in dsn:
+        return dsn.format(database=database)
+    return dsn
+
+
+def _postgres_database_sql(database: str, username: str) -> str:
+    return (
+        "SELECT "
+        f"'CREATE DATABASE {_sql_ident(database)} OWNER {_sql_ident(username)}' "
+        f"WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = {_sql_literal(database)})"
+        "\n\\gexec"
+    )
+
+
+def _postgres_grants_sql(database: str, username: str) -> str:
+    return (
+        f"GRANT CONNECT ON DATABASE {_sql_ident(database)} TO {_sql_ident(username)}; "
+        f"GRANT USAGE, CREATE ON SCHEMA public TO {_sql_ident(username)}; "
+        f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {_sql_ident(username)}; "
+        f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {_sql_ident(username)};"
+    )
+
+
+def _postgres_safe_name(value: str) -> str:
+    name = re.sub(r"[^a-zA-Z0-9_]+", "_", value).strip("_").lower()
+    return name or "app"
+
+
+def _sql_ident(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def _sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _validate_mount(mount: dict) -> None:

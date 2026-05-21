@@ -142,6 +142,10 @@ class AddResourceBindingRequest(BaseModel):
     mounts: list[dict] = Field(default_factory=list)
 
 
+class ApplyResourceBindingRequest(BaseModel):
+    dry_run: bool = False
+
+
 def create_app(config: DeployerConfig | None = None) -> FastAPI:
     app = FastAPI(title="Home PaaS Deployer API")
     app.state.config = config
@@ -539,6 +543,31 @@ def create_app(config: DeployerConfig | None = None) -> FastAPI:
             mounts=tuple(payload.mounts),
         )
         return {"binding": _resource_binding_payload(binding)}
+
+    @app.get("/api/environments/{environment}/projects/{project}/resource-bindings/{binding}/plan")
+    def plan_project_resource_binding(
+        environment: str,
+        project: str,
+        binding: str,
+        catalog: CatalogDep,
+    ) -> dict:
+        return {"plan": _resource_plan_payload(catalog.plan_project_resource_binding(environment, project, binding))}
+
+    @app.post("/api/environments/{environment}/projects/{project}/resource-bindings/{binding}/apply")
+    def apply_project_resource_binding(
+        environment: str,
+        project: str,
+        binding: str,
+        payload: ApplyResourceBindingRequest,
+        catalog: CatalogDep,
+    ) -> dict:
+        plan, log = catalog.apply_project_resource_binding(
+            environment,
+            project,
+            binding,
+            dry_run=payload.dry_run,
+        )
+        return {"plan": _resource_plan_payload(plan), "log": log, "dry_run": payload.dry_run}
 
     @app.get("/api/environments/{environment}/projects/{project}/preview")
     def project_preview(environment: str, project: str, catalog: CatalogDep) -> dict:
@@ -978,6 +1007,21 @@ def _resource_binding_payload(binding: ProjectResourceBindingRecord) -> dict:
         "status": binding.status,
         "created_at": binding.created_at,
         "updated_at": binding.updated_at,
+    }
+
+
+def _resource_plan_payload(plan) -> dict:
+    return {
+        "environment": plan.environment,
+        "project": plan.project,
+        "binding": plan.binding,
+        "resource": plan.resource,
+        "resource_type": plan.resource_type,
+        "config": plan.config,
+        "outputs": plan.outputs,
+        "steps": list(plan.steps),
+        "commands": [" ".join(command) for command in plan.commands],
+        "warnings": list(plan.warnings),
     }
 
 

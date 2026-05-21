@@ -61,7 +61,7 @@ This catalog model is now considered an intermediate implementation, not the tar
 architecture. The next refactor moves to:
 
 ```text
-Environment -> Project -> Components -> Endpoints / Dependencies
+Environment -> Project -> Components -> Endpoints / Resource Bindings
 ```
 
 In the target model, projects are added directly inside environments. There is no global
@@ -76,13 +76,16 @@ deployer environments add dev --url-prefix dev
 deployer projects add dev myapp --git-url <url>
 deployer components add dev myapp backend --build-context backend --dockerfile Dockerfile --port 8000
 deployer endpoints add dev myapp web backend --port 8000 --subdomain myapp --auth sso --health-path /health
-deployer dependencies add dev myapp postgres --type postgres --target postgres-main/myapp_dev --output DATABASE_URL=postgresql://...
+deployer resources add dev postgres-main --type postgres --config host=postgres --config port=5432 --config container=postgres
+deployer bindings add dev myapp app-db --resource postgres-main --component backend
+deployer bindings plan dev myapp app-db
+deployer bindings apply dev myapp app-db
 deployer projects env-set dev myapp KEY=value
 deployer projects show dev myapp
 ```
 
 `deployer.yml` is not required for environment projects. Runtime configuration is stored in deployer state:
-source, compose files, components, endpoints, dependency outputs, and env variables. Existing compose-based
+source, compose files, components, endpoints, resource binding outputs, and env variables. Existing compose-based
 repositories use `--compose-file` or the default `docker-compose.yml`; Dockerfile/image-only projects can use
 `--no-compose-file` and generated component definitions.
 

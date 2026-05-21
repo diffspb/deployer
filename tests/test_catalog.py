@@ -262,6 +262,74 @@ def test_catalog_resource_binding_generates_env_and_volume_mount(tmp_path: Path)
     assert "volumes:" in override
 
 
+def test_catalog_managed_postgres_binding_plan_and_apply(tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "docker-compose.yml").write_text("services:\n  app:\n    image: nginx:alpine\n")
+    state = StateStore(tmp_path / "state.db")
+
+    class Runner:
+        def __init__(self):
+            self.commands = []
+
+        def run(self, args, cwd, env=None):
+            self.commands.append(tuple(args))
+            return CommandResult(tuple(args), 0, "ok\n")
+
+    runner = Runner()
+    catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime", runner=runner)
+    catalog.add_project_local("dev", "tasktrack", source)
+    catalog.add_component("dev", "tasktrack", "backend", mode="compose", compose_service="app")
+    catalog.add_environment_resource(
+        "dev",
+        "postgres-main",
+        "postgres",
+        config={"host": "postgres", "port": "5432", "container": "postgres-1", "admin_user": "postgres"},
+    )
+    catalog.bind_project_resource("dev", "tasktrack", "app-db", "postgres-main", component="backend")
+
+    plan = catalog.plan_project_resource_binding("dev", "tasktrack", "app-db")
+
+    assert plan.config["database"] == "dev_tasktrack"
+    assert plan.config["username"] == "dev_tasktrack"
+    assert "Password will be generated" in plan.warnings[0]
+    assert "ensure database dev_tasktrack exists" in plan.steps
+
+    applied, log = catalog.apply_project_resource_binding("dev", "tasktrack", "app-db")
+    binding = state.require_project_resource_binding("dev", "tasktrack", "app-db")
+
+    assert applied.config["password"]
+    assert binding.config["password"] == applied.config["password"]
+    assert binding.outputs["DATABASE_URL"].startswith("postgresql://dev_tasktrack:")
+    assert binding.outputs["DATABASE_URL"].endswith("@postgres:5432/dev_tasktrack")
+    assert len(runner.commands) == 3
+    assert runner.commands[0][:4] == ("docker", "exec", "postgres-1", "psql")
+    assert "updated binding dev/tasktrack/app-db" in log
+    assert catalog.render_project_env_file("dev", "tasktrack").read_text() == (
+        f"DATABASE_URL={binding.outputs['DATABASE_URL']}\n"
+    )
+
+
+def test_catalog_managed_postgres_apply_dry_run_does_not_update_binding(tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "docker-compose.yml").write_text("services:\n  app:\n    image: nginx:alpine\n")
+    state = StateStore(tmp_path / "state.db")
+    catalog = ServiceCatalog(state, runtime_dir=tmp_path / "runtime")
+    catalog.add_project_local("dev", "tasktrack", source)
+    catalog.add_component("dev", "tasktrack", "backend", mode="compose", compose_service="app")
+    catalog.add_environment_resource("dev", "postgres-main", "postgres", config={"host": "postgres"})
+    catalog.bind_project_resource("dev", "tasktrack", "app-db", "postgres-main", component="backend")
+
+    plan, log = catalog.apply_project_resource_binding("dev", "tasktrack", "app-db", dry_run=True)
+    binding = state.require_project_resource_binding("dev", "tasktrack", "app-db")
+
+    assert plan.config["password"]
+    assert "Dry run command:" in log
+    assert binding.config == {}
+    assert binding.outputs == {}
+
+
 def test_catalog_allows_same_project_name_in_different_environments(tmp_path: Path):
     source = tmp_path / "source"
     source.mkdir()
