@@ -324,8 +324,9 @@ def test_catalog_managed_postgres_apply_dry_run_does_not_update_binding(tmp_path
     plan, log = catalog.apply_project_resource_binding("dev", "tasktrack", "app-db", dry_run=True)
     binding = state.require_project_resource_binding("dev", "tasktrack", "app-db")
 
-    assert plan.config["password"]
+    assert "password" not in plan.config
     assert "Dry run command:" in log
+    assert "PASSWORD '***'" in log
     assert binding.config == {}
     assert binding.outputs == {}
 

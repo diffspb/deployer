@@ -582,7 +582,7 @@ def _print_resource_plan(plan) -> None:
         print(f"  {key}={safe_value}")
     print("outputs:")
     for key, value in sorted(plan.outputs.items()):
-        print(f"  {key}={value}")
+        print(f"  {key}={_redact_output_value(key, value)}")
     print("steps:")
     for step in plan.steps:
         print(f"  - {step}")
@@ -590,6 +590,18 @@ def _print_resource_plan(plan) -> None:
         print("warnings:")
         for warning in plan.warnings:
             print(f"  - {warning}")
+
+
+def _redact_output_value(key: str, value: str) -> str:
+    if "PASSWORD" in key.upper():
+        return "***"
+    if key.upper().endswith("_URL") and "://" in value and "@" in value:
+        scheme, rest = value.split("://", 1)
+        auth, target = rest.split("@", 1)
+        if ":" in auth:
+            user, _ = auth.split(":", 1)
+            return f"{scheme}://{user}:***@{target}"
+    return value
 
 
 def _parse_assignments(assignments: list[str]) -> dict[str, str]:

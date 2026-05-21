@@ -601,7 +601,7 @@ class ServiceCatalog:
             raise CatalogError(f"Unknown resource binding: {environment}/{project}/{name}") from exc
         if resource.type != "postgres":
             raise CatalogError(f"Managed provisioning is not supported for resource type: {resource.type}")
-        config = _managed_postgres_config(environment, project, binding, generate_password=True)
+        config = _managed_postgres_config(environment, project, binding, generate_password=not dry_run)
         outputs = {
             **binding.outputs,
             **_postgres_binding_outputs(resource.config, config, binding.outputs),
@@ -625,7 +625,7 @@ class ServiceCatalog:
         )
         log_lines = [f"Plan: {step}" for step in plan.steps]
         if dry_run:
-            log_lines.extend(f"Dry run command: {' '.join(command)}" for command in commands)
+            log_lines.extend(f"Dry run command: {' '.join(_redact_command(command))}" for command in commands)
             return plan, "\n".join(log_lines)
         if not _postgres_admin_mode(resource.config):
             raise CatalogError("Postgres resource must define admin_dsn or container before apply can run")
@@ -1320,6 +1320,14 @@ def _postgres_provision_commands(resource_config: dict, binding_config: dict) ->
         _postgres_admin_command(resource_config, database, _postgres_grants_sql(database, username)),
     ]
     return tuple(command for command in commands if command)
+
+
+def _redact_command(command: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(_redact_secret_text(part) for part in command)
+
+
+def _redact_secret_text(value: str) -> str:
+    return re.sub(r"(PASSWORD\s+')([^']*)(')", r"\1***\3", value)
 
 
 def _postgres_admin_mode(resource_config: dict) -> str | None:

@@ -945,7 +945,7 @@ function renderResourcePlanDrawer() {
       <div class="preview-panel">
         <div class="section-title">Config</div>
         ${renderKeyValueList(maskSecretValues(plan.config || {}), "Resolved config")}
-        ${renderKeyValueList(plan.outputs || {}, "Outputs")}
+        ${renderKeyValueList(maskSecretOutputs(plan.outputs || {}), "Outputs")}
       </div>
       <div class="preview-panel top-gap">
         <div class="section-title">Steps</div>
@@ -959,6 +959,19 @@ function renderResourcePlanDrawer() {
 
 function maskSecretValues(values) {
   return Object.fromEntries(Object.entries(values || {}).map(([key, value]) => [key, key.toLowerCase().includes("password") ? "***" : value]));
+}
+
+function maskSecretOutputs(values) {
+  return Object.fromEntries(Object.entries(values || {}).map(([key, value]) => [key, redactOutputValue(key, value)]));
+}
+
+function redactOutputValue(key, value) {
+  const text = String(value || "");
+  if (key.toUpperCase().includes("PASSWORD")) return "***";
+  if (key.toUpperCase().endsWith("_URL") && text.includes("://") && text.includes("@")) {
+    return text.replace(/:\/\/([^:@]+):([^@]+)@/, "://$1:***@");
+  }
+  return text;
 }
 
 function renderEmpty(message = "Nothing here yet") {

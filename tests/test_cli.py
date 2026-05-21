@@ -617,7 +617,7 @@ def test_cli_environment_project_workflow(tmp_path: Path, capsys):
     )
     output = capsys.readouterr().out
     assert "binding: dev/tasktrack/app-db" in output
-    assert "DATABASE_URL=postgresql://tasktrack_dev:secret@postgres:5432/tasktrack_dev" in output
+    assert "DATABASE_URL=postgresql://tasktrack_dev:***@postgres:5432/tasktrack_dev" in output
 
     assert (
         main(
@@ -636,7 +636,9 @@ def test_cli_environment_project_workflow(tmp_path: Path, capsys):
         )
         == 0
     )
-    assert "Dry run command:" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Dry run command:" in output
+    assert "PASSWORD '***'" in output
 
     assert (
         main(
