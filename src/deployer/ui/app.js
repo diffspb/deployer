@@ -1,5 +1,6 @@
 const state = {
   environments: [],
+  environmentResources: {},
   projects: [],
   jobs: [],
   webhookEvents: [],
@@ -12,6 +13,7 @@ const state = {
   deployModal: null,
   logsDrawer: null,
   jobDrawer: null,
+  previewDrawer: null,
   runtimeStatus: {},
   filters: {
     query: "",
@@ -195,7 +197,11 @@ async function loadAll() {
     const projectLists = await Promise.all(
       state.environments.map((environment) => api(`/api/environments/${encodeURIComponent(environment.name)}/projects`)),
     );
+    const resourceLists = await Promise.all(
+      state.environments.map((environment) => api(`/api/environments/${encodeURIComponent(environment.name)}/resources`)),
+    );
     state.projects = projectLists.flatMap((item) => item.projects || []);
+    state.environmentResources = Object.fromEntries(resourceLists.map((item) => [item.environment, item.resources || []]));
     syncRuntimeStatusFromProjects();
     state.loadError = "";
     syncCurrentView();
@@ -318,6 +324,7 @@ function render() {
       ${state.deployModal ? renderDeployModal() : ""}
       ${state.logsDrawer ? renderLogsDrawer() : ""}
       ${state.jobDrawer ? renderJobDrawer() : ""}
+      ${state.previewDrawer ? renderPreviewDrawer() : ""}
       ${state.toast ? `<div class="toast">${escapeHtml(state.toast)}</div>` : ""}
     </div>
   `;
@@ -458,6 +465,39 @@ function renderEnvironmentView() {
       <section class="card page-card">
         ${projects.length ? renderProjectTable(projects, false) : renderEmpty(`No projects in ${environment.name}`)}
       </section>
+      <section class="card page-card">
+        <div class="page-header">
+          <div>
+            <div class="section-title">Environment resources</div>
+            <div class="muted">Shared resources available to projects in this environment. Bindings decide which env vars or mounts a project receives.</div>
+          </div>
+        </div>
+        ${renderEnvironmentResources(environment.name)}
+      </section>
+    </div>
+  `;
+}
+
+function renderEnvironmentResources(environment) {
+  const resources = state.environmentResources[environment] || [];
+  return `
+    <div class="preview-panel">
+      ${resources.length ? resources.map((resource) => `
+        <div class="fact compact">
+          <span class="fact-label">${escapeHtml(resource.name)}</span>
+          <span class="fact-value mono">${escapeHtml(resource.type)} · ${escapeHtml(compactJson(resource.config))}</span>
+        </div>
+      `).join("") : `<div class="muted">No environment resources yet.</div>`}
+      <form class="inline-form top-gap" onsubmit="addEnvironmentResource(event, ${js(environment)})">
+        <input class="input" name="name" placeholder="name, e.g. postgres-main" required>
+        <select class="select" name="type">
+          <option value="postgres">postgres</option>
+          <option value="docker-volumes">docker-volumes</option>
+          <option value="generic">generic</option>
+        </select>
+        <input class="input" name="config" placeholder='config JSON, e.g. {"host":"postgres","port":5432}'>
+        <button class="btn secondary" type="submit">${icon("plus")} Add resource</button>
+      </form>
     </div>
   `;
 }
@@ -549,11 +589,12 @@ function renderProjectView() {
           <button class="btn secondary" onclick="runtimeAction(${js(project.environment)}, ${js(project.name)}, 'restart')">${icon("refresh")} Restart</button>
           <button class="btn secondary" onclick="runtimeAction(${js(project.environment)}, ${js(project.name)}, 'stop')">${icon("stop")} Stop</button>
           <button class="btn danger" onclick="runtimeAction(${js(project.environment)}, ${js(project.name)}, 'down')">${icon("trash")} Down</button>
-          <button class="btn secondary" onclick="openLogs(${js(project.environment)}, ${js(project.name)})">${icon("list")} Logs</button>
+        <button class="btn secondary" onclick="openLogs(${js(project.environment)}, ${js(project.name)})">${icon("list")} Logs</button>
+        <button class="btn secondary" onclick="openPreview(${js(project.environment)}, ${js(project.name)})">${icon("list")} Preview</button>
         </div>
       </section>
       <section class="card page-card">
-        <div class="page-header"><div><div class="section-title">Configuration</div><div class="muted">Components, endpoints, dependencies, and env vars for this environment project.</div></div></div>
+        <div class="page-header"><div><div class="section-title">Configuration</div><div class="muted">Components, endpoints, resources, and env vars for this environment project.</div></div></div>
         ${renderProjectConfig(project)}
       </section>
       <section class="card page-card">
@@ -586,7 +627,9 @@ function renderProjectConfig(project) {
   const endpoints = project.endpoints || [];
   const dependencies = project.dependencies || [];
   const resourceBindings = project.resource_bindings || [];
+  const resources = project.environment_resources || state.environmentResources[project.environment] || [];
   const envEntries = Object.entries(project.env || {});
+  const resourceOptions = resources.map((resource) => `<option value="${escapeHtml(resource.name)}">${escapeHtml(resource.name)} · ${escapeHtml(resource.type)}</option>`).join("");
   return `
     <div class="config-grid">
       <div class="preview-panel">
@@ -641,7 +684,29 @@ function renderProjectConfig(project) {
         </form>
       </div>
       <div class="preview-panel">
-        <div class="section-title">Dependencies</div>
+        <div class="section-title">Resource Bindings</div>
+        ${resourceBindings.length ? resourceBindings.map((item) => `
+          <div class="fact compact">
+            <span class="fact-label">${escapeHtml(item.name)}</span>
+            <span class="fact-value mono">${escapeHtml(item.resource_name)} · component ${escapeHtml(item.component || "-")}</span>
+          </div>
+          ${renderKeyValueList(item.outputs, "Generated env")}
+          ${renderMountList(item.mounts)}
+        `).join("") : `<div class="muted">No resource bindings.</div>`}
+        ${resources.length ? `
+          <form class="inline-form top-gap" onsubmit="addResourceBinding(event, ${js(project.environment)}, ${js(project.name)})">
+            <input class="input" name="name" placeholder="binding name" required>
+            <select class="select" name="resource_name" required>${resourceOptions}</select>
+            <input class="input" name="component" placeholder="component">
+            <input class="input" name="config" placeholder='config JSON, e.g. {"database":"app","username":"app","password":"secret"}'>
+            <input class="input" name="output" placeholder="optional KEY=value override">
+            <button class="btn secondary" type="submit">${icon("plus")} Bind</button>
+          </form>
+        ` : `<div class="muted top-gap">Add an environment resource before creating bindings.</div>`}
+      </div>
+      <div class="preview-panel">
+        <div class="section-title">Compatibility dependencies</div>
+        <div class="muted">Legacy manual outputs. Prefer environment resources and bindings for new projects.</div>
         ${dependencies.length ? dependencies.map((item) => `
           <div class="fact compact">
             <span class="fact-label">${escapeHtml(item.name)}</span>
@@ -651,34 +716,31 @@ function renderProjectConfig(project) {
               <button class="link-btn danger" onclick="deleteDependency(${js(project.environment)}, ${js(project.name)}, ${js(item.name)})">Delete</button>
             </span>
           </div>
+          ${renderKeyValueList(item.outputs, "Outputs")}
         `).join("") : `<div class="muted">No dependencies.</div>`}
-        <form class="inline-form top-gap" onsubmit="addDependency(event, ${js(project.environment)}, ${js(project.name)})">
-          <input class="input" name="name" placeholder="name" required>
-          <input class="input" name="type" placeholder="type" required>
-          <input class="input" name="target" placeholder="target" required>
-          <input class="input" name="output" placeholder="KEY=value">
-          <button class="btn secondary" type="submit">${icon("plus")} Add</button>
-        </form>
-      </div>
-      <div class="preview-panel">
-        <div class="section-title">Resource Bindings</div>
-        ${resourceBindings.length ? resourceBindings.map((item) => `
-          <div class="fact compact">
-            <span class="fact-label">${escapeHtml(item.name)}</span>
-            <span class="fact-value mono">${escapeHtml(item.resource_name)} · component ${escapeHtml(item.component || "-")}</span>
-          </div>
-        `).join("") : `<div class="muted">No resource bindings.</div>`}
-        <form class="inline-form top-gap" onsubmit="addResourceBinding(event, ${js(project.environment)}, ${js(project.name)})">
-          <input class="input" name="name" placeholder="binding name" required>
-          <input class="input" name="resource_name" placeholder="resource name" required>
-          <input class="input" name="component" placeholder="component">
-          <input class="input" name="config" placeholder='config JSON, e.g. {"database":"app"}'>
-          <input class="input" name="output" placeholder="KEY=value">
-          <button class="btn secondary" type="submit">${icon("plus")} Bind</button>
-        </form>
       </div>
     </div>
   `;
+}
+
+function renderKeyValueList(values, title) {
+  const entries = Object.entries(values || {});
+  if (!entries.length) return "";
+  return `<div class="subtle top-gap">${escapeHtml(title)}</div>${entries.map(([key, value]) => `
+    <div class="fact compact"><span class="fact-label mono">${escapeHtml(key)}</span><span class="fact-value mono">${escapeHtml(value)}</span></div>
+  `).join("")}`;
+}
+
+function renderMountList(mounts) {
+  if (!mounts?.length) return "";
+  return `<div class="subtle top-gap">Mounts</div>${mounts.map((mount) => `
+    <div class="fact compact"><span class="fact-label mono">${escapeHtml(mount.source || "-")}</span><span class="fact-value mono">${escapeHtml(mount.target || "-")}</span></div>
+  `).join("")}`;
+}
+
+function compactJson(value) {
+  const json = JSON.stringify(value || {});
+  return json.length > 90 ? `${json.slice(0, 87)}...` : json;
 }
 
 function renderJobsView() {
@@ -821,6 +883,43 @@ function renderJobDrawer() {
       ${job.error ? `<div class="inline-error job-error"><div class="error-title">Error</div><div class="error-list"><div>${escapeHtml(job.error)}</div></div></div>` : ""}
       ${job.log_truncated ? `<div class="muted log-note">Output is truncated by API limit. Use CLI or container logs for the full output.</div>` : ""}
       <pre class="log-box">${escapeHtml(log)}</pre>
+    </aside>
+  `;
+}
+
+function renderPreviewDrawer() {
+  const preview = state.previewDrawer;
+  const envEntries = Object.entries(preview.env_vars || {});
+  return `
+    <div class="drawer-backdrop" onclick="closePreview()"></div>
+    <aside class="drawer wide-drawer">
+      <div class="drawer-head">
+        <div><div class="section-title">Preview ${escapeHtml(preview.environment)}/${escapeHtml(preview.project)}</div><div class="muted">Rendered env vars, resource bindings, and compose override before deploy.</div></div>
+        <button class="btn ghost" onclick="closePreview()">${icon("close")}</button>
+      </div>
+      ${preview.errors?.length ? renderError(preview.errors.map((item) => `${item.scope}: ${item.message}`).join("; ")) : ""}
+      <div class="job-meta-grid">
+        <div class="fact compact"><span class="fact-label">Valid</span><span class="fact-value">${badge(preview.valid ? "success" : "failed", preview.valid ? "valid" : "invalid")}</span></div>
+        <div class="fact compact"><span class="fact-label">Source</span><span class="fact-value mono">${escapeHtml(preview.source_path || "-")}</span></div>
+        <div class="fact compact"><span class="fact-label">Env file</span><span class="fact-value mono">${escapeHtml(preview.env_file_path || "-")}</span></div>
+        <div class="fact compact"><span class="fact-label">Override</span><span class="fact-value mono">${escapeHtml(preview.override_path || "-")}</span></div>
+      </div>
+      <div class="preview-panel top-gap">
+        <div class="section-title">Rendered env vars</div>
+        ${envEntries.length ? envEntries.map(([key, value]) => `<div class="fact compact"><span class="fact-label mono">${escapeHtml(key)}</span><span class="fact-value mono">${escapeHtml(value)}</span></div>`).join("") : `<div class="muted">No env vars.</div>`}
+      </div>
+      <div class="preview-panel top-gap">
+        <div class="section-title">Resource bindings</div>
+        ${preview.resource_bindings?.length ? preview.resource_bindings.map((binding) => `
+          <div class="fact compact"><span class="fact-label">${escapeHtml(binding.name)}</span><span class="fact-value mono">${escapeHtml(binding.resource_name)} · ${escapeHtml(binding.component || "-")}</span></div>
+          ${renderKeyValueList(binding.outputs, "Generated env")}
+          ${renderMountList(binding.mounts)}
+        `).join("") : `<div class="muted">No resource bindings.</div>`}
+      </div>
+      <div class="preview-panel top-gap">
+        <div class="section-title">Override</div>
+        <pre class="log-box">${escapeHtml(preview.override_content || "No override rendered.")}</pre>
+      </div>
     </aside>
   `;
 }
@@ -1164,6 +1263,32 @@ async function deleteDependency(environment, project, dependency) {
   render();
 }
 
+async function addEnvironmentResource(event, environment) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  let config = {};
+  const configText = String(form.get("config") || "").trim();
+  if (configText) {
+    try {
+      config = JSON.parse(configText);
+    } catch (error) {
+      setToast(`Invalid config JSON: ${error.message}`);
+      return;
+    }
+  }
+  const response = await api(`/api/environments/${encodeURIComponent(environment)}/resources`, {
+    method: "POST",
+    body: JSON.stringify({
+      name: String(form.get("name") || "").trim(),
+      type: String(form.get("type") || "").trim(),
+      config,
+    }),
+  });
+  state.environmentResources[environment] = [...(state.environmentResources[environment] || []), response.resource];
+  setToast(`Resource ${response.resource.name} added`);
+  render();
+}
+
 async function addResourceBinding(event, environment, project) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
@@ -1195,6 +1320,37 @@ async function addResourceBinding(event, environment, project) {
     }),
   });
   await refreshProject(environment, project);
+  render();
+}
+
+async function openPreview(environment, project) {
+  state.previewDrawer = {
+    environment,
+    project,
+    valid: false,
+    env_vars: {},
+    resource_bindings: [],
+    override_content: "Loading preview...",
+  };
+  render();
+  try {
+    state.previewDrawer = await api(`/api/environments/${encodeURIComponent(environment)}/projects/${encodeURIComponent(project)}/preview`);
+  } catch (error) {
+    state.previewDrawer = {
+      environment,
+      project,
+      valid: false,
+      env_vars: {},
+      resource_bindings: [],
+      errors: [{ scope: "api", message: error.message }],
+      override_content: "",
+    };
+  }
+  render();
+}
+
+function closePreview() {
+  state.previewDrawer = null;
   render();
 }
 

@@ -344,6 +344,7 @@ services:
     assert detail["components"][0]["name"] == "web"
     assert detail["endpoints"][0]["public_url"] == "https://tasktrack.dev.busypage.ru/"
     assert detail["dependencies"][0]["target"] == "postgres-main/tasktrack_stage"
+    assert detail["environment_resources"][0]["name"] == "postgres-main"
     assert detail["resource_bindings"][0]["resource_name"] == "postgres-main"
     assert detail["public_urls"] == ["https://tasktrack.dev.busypage.ru/"]
 
@@ -355,6 +356,13 @@ services:
     assert preview.status_code == 200
     assert preview.json()["valid"] is True
     assert "Host(`tasktrack.dev.busypage.ru`)" in preview.json()["override_content"]
+    assert preview.json()["env_vars"]["APP_ENV"] == "dev"
+    assert preview.json()["env_vars"]["DATABASE_URL"] == (
+        "postgresql://tasktrack_dev:secret@postgres:5432/tasktrack_dev"
+    )
+    assert preview.json()["resource_bindings"][0]["mounts"] == [
+        {"source": "dev_tasktrack_uploads", "target": "/app/uploads"}
+    ]
     assert "APP_ENV=dev\n" in preview.json()["env_file_content"]
     assert "DATABASE_URL=postgresql://tasktrack_dev:secret@postgres:5432/tasktrack_dev\n" in preview.json()["env_file_content"]
 

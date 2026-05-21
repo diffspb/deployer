@@ -88,10 +88,10 @@
 - [x] Add extensible environment resource and project resource binding foundation.
 - [x] Implement initial Postgres binding env generation using one server with separate databases/users.
 - [x] Render resource binding volume mounts into generated compose overrides.
-- [ ] Replace compatibility dependency UI with resource-first UI flows.
+- [x] Replace compatibility dependency UI with resource-first UI flows.
 - [ ] Add real Postgres provider provisioning for database/user/password creation.
 - [ ] Add Docker volume provider lifecycle management.
-- [ ] Add resource binding preview that clearly shows generated env vars and mounts before deploy.
+- [x] Add resource binding preview that clearly shows generated env vars and mounts before deploy.
 
 ## Resource Providers
 
@@ -146,7 +146,9 @@
 - [x] Add cached runtime status snapshots updated by explicit status checks and successful runtime actions.
 - [x] Remove red failure styling from never-checked/unknown runtime status.
 - [x] Show resource bindings on the project configuration page.
-- [ ] Add environment resource management UI.
+- [x] Add environment resource management UI.
+- [x] Add resource binding preview that clearly shows generated env vars and mounts before deploy.
+- [x] Hide legacy dependency creation from the main UI and mark dependencies as compatibility-only.
 - [ ] Replace prompt/basic forms for resource bindings with a guided resource binding wizard.
 - [ ] Replace manual status refresh with an event-driven status mechanism.
 - [ ] Add mobile navigation for small screens.
@@ -154,11 +156,11 @@
 ## Near-Term Plan
 
 1. Verify resource bindings on the server with `paas-test-app`.
-2. Implement resource binding preview in UI/API so generated env vars and mounts are visible before deploy.
-3. Implement managed Postgres provider with a dry-run/plan mode first.
-4. Add secret storage or secret references before allowing provider-generated passwords in production.
-5. Implement Docker volume provider lifecycle after Postgres provider shape is proven.
-6. Remove or hide legacy `dependencies` from the main UI once resources/bindings cover the workflow.
+2. Implement managed Postgres provider with a dry-run/plan mode first.
+3. Add secret storage or secret references before allowing provider-generated passwords in production.
+4. Implement Docker volume provider lifecycle after Postgres provider shape is proven.
+5. Replace prompt/basic forms for resource bindings with a guided wizard.
+6. Remove compatibility `dependencies` API/CLI after resource bindings fully cover existing workflows.
 
 ## Runtime Targets v2
 

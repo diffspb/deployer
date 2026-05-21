@@ -878,6 +878,10 @@ def _project_detail_payload(catalog: ServiceCatalog, environment: str, project: 
     config = catalog.project_config(environment, project)
     return {
         **_project_payload(catalog, config.project),
+        "environment_resources": [
+            _environment_resource_payload(resource)
+            for resource in catalog.state.list_environment_resources(environment)
+        ],
         "components": [_component_payload(component) for component in config.components],
         "endpoints": [
             _endpoint_payload(catalog, environment, project, endpoint)
@@ -1183,6 +1187,7 @@ def _project_preview_payload(catalog: ServiceCatalog, environment: str, project:
     runtime = catalog.resolve_project_runtime(environment, project)
     env_file = catalog.render_project_env_file(environment, project)
     env_file_content = env_file.read_text()
+    env_vars = catalog.project_runtime_env(environment, project)
 
     errors: list[dict[str, str]] = []
     override_content = None
@@ -1214,6 +1219,8 @@ def _project_preview_payload(catalog: ServiceCatalog, environment: str, project:
         "compose_files": list(config.project.compose_files),
         "public_urls": public_urls,
         "env_file_path": str(runtime.env_file),
+        "env_vars": env_vars,
+        "resource_bindings": [_resource_binding_payload(binding) for binding in config.resource_bindings],
         "env_file_content": env_file_content,
         "override_path": str(runtime.override_dir / f"{environment}.override.yml"),
         "override_content": override_content if not errors else None,

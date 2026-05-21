@@ -554,6 +554,9 @@ class ServiceCatalog:
         env_file.write_text(render_env(env_vars))
         return env_file
 
+    def project_runtime_env(self, environment: str, project: str) -> dict[str, str]:
+        return _project_runtime_env(self.project_config(environment, project))
+
     def deploy_project(
         self,
         environment: str,

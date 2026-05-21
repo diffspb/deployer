@@ -291,6 +291,13 @@ Project page inside an environment:
 - jobs/history/logs;
 - deploy/restart/stop/down actions.
 
+Current UI transition rule:
+
+- environment pages own resource creation;
+- project pages own resource bindings and render preview;
+- preview must show generated env vars, mounts, public URLs, and compose override before deploy;
+- legacy dependencies may be displayed for old records, but new work should use resources and bindings.
+
 There should be no global service page that mixes environments. Cross-environment
 comparison can be added later as a reporting page, not as the primary control surface.
 

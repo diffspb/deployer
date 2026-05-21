@@ -6,7 +6,7 @@ The service/runtime-target API is still present for compatibility, but the targe
 environment-first:
 
 ```text
-Environment -> Project -> Components -> Endpoints / Dependencies
+Environment -> Project -> Components -> Endpoints / Resource Bindings
 ```
 
 New UI work should use `/api/environments/{environment}/projects/{project}` operations. No compatibility
@@ -20,6 +20,10 @@ Environment Resource -> Project Resource Binding -> generated env vars / mounts
 
 Legacy project `dependencies` are still present, but they are no longer the preferred extension point for managed
 resources.
+
+The Web UI should expose environment resources on environment pages and project resource bindings on project pages.
+The project preview response includes rendered env vars and binding mounts so an operator can verify generated
+configuration before scheduling deploy.
 
 ## Configuration
 
@@ -362,6 +366,13 @@ Create a runtime target by referencing an existing profile:
 
 `GET /api/services/{name}/preview?environment=prod` returns the current generated runtime inputs
 without starting a deploy job. The response is intended for the Web UI preflight/preview flow.
+
+For the environment-first API, use
+`GET /api/environments/{environment}/projects/{project}/preview`. It returns the same preflight data plus:
+
+- `public_urls`: all generated public endpoints;
+- `env_vars`: resolved runtime env after project env, compatibility dependencies, and resource bindings are merged;
+- `resource_bindings`: binding records including generated `outputs` and compose `mounts`.
 
 Example response:
 
